@@ -56,3 +56,5 @@ How to use
     ```
 
 _If you want to recommend any changes or improvements, feel free to open an issue, but keep in mind this is meant to be a basic/simple/minimal dashboard for Linux systems (Made by me for myself and some friends), so don't recommend shit like "add a screen mirror to the adb section" or "add an app launcher"._
+
+Here is a video showcasing the dashboard: 
