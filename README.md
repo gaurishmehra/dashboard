@@ -43,7 +43,7 @@ How to use
         hyprctl dispatch closewindow "title:^Media Controller$"
     else
         # If not running, launch it
-        cd "/home/gaurish/Documents/dashboard" && python3 "$APP_SCRIPT" &
+        cd "path/to/dashboard" && python3 "$APP_SCRIPT" &
     fi
     ```
     Make it executable:
