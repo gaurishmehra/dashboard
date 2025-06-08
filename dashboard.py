@@ -485,7 +485,7 @@ class Dashboard(Adw.ApplicationWindow):
 
 class DashboardApp(Adw.Application):
     def __init__(self, **kwargs):
-        super().__init__(application_id="com.example.Dashboard", **kwargs)
+        super().__init__(application_id="com.gaurish.Dashboard", **kwargs)
         self.connect('activate', self.on_activate)
     
     def on_activate(self, app):
