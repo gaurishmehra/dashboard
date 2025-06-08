@@ -320,7 +320,7 @@ class MediaPlayerWidget(Gtk.Box):
         
         # Start monitoring - more frequent updates
         self.update_players()
-        GLib.timeout_add(250, self.update_status)  # 4 times per second for smoother updates
+        GLib.timeout_add(500, self.update_status)  # 2 times per second for smoother updates
 
     def command_worker(self):
         """Worker thread for executing commands"""

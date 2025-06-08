@@ -195,16 +195,13 @@ class Dashboard(Adw.ApplicationWindow):
             background: transparent;
             opacity: 0;
             min-width: 0px;
-            max-width: 0px;
         }
         
         .invisible-scroll scrollbar slider {
             background: transparent;
             opacity: 0;
             min-width: 0px;
-            max-width: 0px;
         }
-        
         /* FIXED: ACTUALLY VISIBLE body scrollbars with proper styling */
         .notification-body-scroll {
             background: rgba(255, 255, 255, 0.03);

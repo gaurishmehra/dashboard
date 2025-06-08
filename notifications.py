@@ -128,7 +128,6 @@ class NotificationRow(Gtk.ListBoxRow):
         
         self.set_child(main_box)
     
-    # --- CHANGE 2: Update load_icon to use the Adw.Avatar API ---
     def load_icon(self):
         """Load icon into the Adw.Avatar widget."""
         try:
@@ -138,23 +137,14 @@ class NotificationRow(Gtk.ListBoxRow):
             # 1. Try to load the custom image file first
             if icon_path and os.path.exists(icon_path):
                 try:
-                    # Adw.Avatar accepts a Gdk.Paintable. Gdk.Texture is a good choice.
                     texture = Gdk.Texture.new_from_filename(icon_path)
                     self.avatar.set_custom_image(texture)
                     return
                 except GLib.Error as e:
                     print(f"Failed to load texture from {icon_path}: {e}")
 
-            # 2. Fallback to a symbolic icon name
-            icon_name = self.get_symbolic_icon_name(app_name.lower())
-            if icon_name:
-                # To use an icon, we create a Gtk.Image and set it as the custom image
-                icon_image = Gtk.Image.new_from_icon_name(icon_name)
-                icon_image.set_pixel_size(32) # Icon size within the avatar
-                self.avatar.set_custom_image(icon_image)
-                return
-
-            # 3. Last resort: Use the first letter of the app name
+            # 2. For symbolic icons, just use text - Adw.Avatar will make it circular and colored
+            # The avatar automatically generates nice colored backgrounds for text
             self.avatar.set_text(app_name[0].upper() if app_name else "?")
 
         except Exception as e:
@@ -163,7 +153,6 @@ class NotificationRow(Gtk.ListBoxRow):
             app_name = self.notification.get('app_name', '?')
             self.avatar.set_text(app_name[0].upper())
 
-    # ... (get_symbolic_icon_name, format_timestamp, toggle_expanded, matches_search are unchanged)
     def get_symbolic_icon_name(self, app_name):
         """Get appropriate symbolic icon name"""
         if 'spotify' in app_name:
