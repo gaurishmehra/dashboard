@@ -32,7 +32,7 @@ How to use
    ```
     I recommed making it a keybind to toggle the dashboard:
     ```bash
-     #!/bin/bash
+    #!/bin/bash
 
     # The full path to your media controller python script
     APP_SCRIPT="path/to/dashboard.py"
