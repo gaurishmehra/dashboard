@@ -109,9 +109,10 @@ class QuickActionsWidget(Gtk.Box):
     
     def create_ui(self):
         # Quick actions header
-        actions_label = Gtk.Label(label="Quick Actions (Use KDE Connect for more features)")
+        actions_label = Gtk.Label(label="Quick Actions")
         actions_label.add_css_class("section-title")
         actions_label.set_halign(Gtk.Align.CENTER)
+        actions_label.set_margin_top(16)
         actions_label.set_margin_start(20)
         
         # Action buttons grid
@@ -129,7 +130,7 @@ class QuickActionsWidget(Gtk.Box):
             ("Home", "go-home-symbolic", "input keyevent 3"),
             ("Back", "go-previous-symbolic", "input keyevent 4"),
             ("Recent Apps", "view-grid-symbolic", "input keyevent 187"),
-            ("Restart", "view-refresh-symbolic", "shell reboot"),
+            ("Restart", "view-refresh-symbolic", "reboot"),
         ]
         
         # Create action buttons
@@ -156,9 +157,9 @@ class QuickActionsWidget(Gtk.Box):
             # Connect click handler
             button.connect("clicked", lambda b, cmd=command: self.command_callback(self.device_id, cmd))
             
-            # Position in grid (2 columns)
-            row = i // 2
-            col = i % 2
+            # Position in grid (3 columns for better fit)
+            row = i // 3
+            col = i % 3
             actions_grid.attach(button, col, row, 1, 1)
         
         self.append(actions_label)
@@ -200,19 +201,47 @@ class ADBWidget(Gtk.Box):
         self.command_thread = threading.Thread(target=self.command_worker, daemon=True)
         self.command_thread.start()
         
+        # **LAG FIX: Properties to manage activation state**
+        self.is_active = False
+        self.update_timer_id = None
+        
         self.create_ui()
         
-        # Start monitoring devices
-        self.update_devices()
-        GLib.timeout_add_seconds(3, self.update_devices)
+        # **LAG FIX: Don't start monitoring immediately. This is now handled by activate().**
     
+    # **LAG FIX: New methods to control background activity**
+    def activate(self):
+        """Called when the widget becomes visible."""
+        if self.is_active:
+            return
+        self.is_active = True
+        print("ADBWidget Activated")
+        self.update_devices() # Initial update
+        if self.update_timer_id is None:
+            self.update_timer_id = GLib.timeout_add_seconds(3, self.update_devices)
+
+    def deactivate(self):
+        """Called when the widget is hidden."""
+        if not self.is_active:
+            return
+        self.is_active = False
+        print("ADBWidget Deactivated")
+        if self.update_timer_id:
+            GLib.source_remove(self.update_timer_id)
+            self.update_timer_id = None
+
     def command_worker(self):
         """Worker thread for executing ADB commands"""
         while True:
             try:
                 device_id, command = self.command_queue.get(timeout=1)
                 if device_id and command:
-                    full_command = f"adb -s {device_id} shell {command}"
+                    # Differentiate between shell and non-shell commands
+                    if command.startswith("reboot"):
+                        full_command = f"adb -s {device_id} {command}"
+                    else:
+                        full_command = f"adb -s {device_id} shell {command}"
+                    
                     result = subprocess.run(full_command, shell=True, capture_output=True, text=True, timeout=10)
                     if result.returncode != 0:
                         print(f"ADB command failed: {full_command}")
@@ -272,25 +301,19 @@ class ADBWidget(Gtk.Box):
             android_version = self.run_adb_command(f"-s {device_id} shell getprop ro.build.version.release")
             info['android_version'] = android_version or "Unknown"
             
-            # Get IP address
-            ip_output = self.run_adb_command(f"-s {device_id} shell ip route")
-            ip_match = re.search(r'src (\d+\.\d+\.\d+\.\d+)', ip_output)
-            info['ip_address'] = ip_match.group(1) if ip_match else "Not available"
-            
             # Get battery level
             battery_output = self.run_adb_command(f"-s {device_id} shell dumpsys battery")
             battery_match = re.search(r'level: (\d+)', battery_output)
             battery_level = battery_match.group(1) if battery_match else "Unknown"
             info['battery_level'] = f"{battery_level}%" if battery_level != "Unknown" else "Unknown"
             
-            info['state'] = 'device'  # If we got this far, device is connected
+            info['state'] = 'device'
             
         except Exception as e:
-            print(f"Error getting device info: {e}")
+            print(f"Error getting device info for {device_id}: {e}")
             info.update({
                 'model': 'Unknown Device',
                 'android_version': 'Unknown',
-                'ip_address': 'Not available',
                 'battery_level': 'Unknown',
                 'state': 'unknown'
             })
@@ -299,29 +322,35 @@ class ADBWidget(Gtk.Box):
     
     def update_devices(self):
         """Update list of connected devices"""
+        # **LAG FIX: Add a guard to ensure it only runs when active.**
+        if not self.is_active:
+            return False # Stop the timer
+
         devices_output = self.run_adb_command("devices")
         
-        new_devices = []
+        new_device_infos = []
         if devices_output:
-            lines = devices_output.split('\n')[1:]  # Skip header
+            lines = devices_output.split('\n')[1:]
             for line in lines:
                 if line.strip() and '\t' in line:
                     device_id, state = line.strip().split('\t')
-                    if state == 'device':  # Only include properly connected devices
+                    if state == 'device':
                         device_info = self.get_device_info(device_id)
-                        new_devices.append(device_info)
+                        new_device_infos.append(device_info)
         
-        # Update UI if devices changed
-        if new_devices != self.devices:
-            self.devices = new_devices
+        # Check for changes more reliably
+        current_ids = {d['device_id'] for d in self.devices}
+        new_ids = {d['device_id'] for d in new_device_infos}
+
+        if current_ids != new_ids:
+            self.devices = new_device_infos
             self.update_device_buttons()
             self.update_ui()
         
-        return True
+        return True # Continue timer
     
     def update_device_buttons(self):
         """Update device selection buttons"""
-        # Clear existing buttons
         for button in self.device_buttons:
             self.devices_box.remove(button)
         self.device_buttons.clear()
@@ -333,8 +362,9 @@ class ADBWidget(Gtk.Box):
                 self.device_buttons.append(button)
                 self.devices_box.append(button)
             
-            # Select first device if none selected
-            if not self.current_device and self.devices:
+            # Select first device if none selected or if current is disconnected
+            current_device_still_connected = self.current_device and any(d['device_id'] == self.current_device['device_id'] for d in self.devices)
+            if not current_device_still_connected and self.devices:
                 self.current_device = self.devices[0]
             
             self.update_button_states()
@@ -355,25 +385,23 @@ class ADBWidget(Gtk.Box):
     
     def update_ui(self):
         """Update the UI with current device"""
-        # Clear existing content
-        while True:
-            child = self.content_box.get_first_child()
-            if child is None:
-                break
+        child = self.content_box.get_first_child()
+        while child:
             self.content_box.remove(child)
+            child = self.content_box.get_first_child()
         
         if not self.devices:
             self.show_no_devices()
             return
         
         if not self.current_device:
+            # This case shouldn't happen if devices exist, but as a fallback
+            self.show_no_devices()
             return
         
-        # Show current device info
         device_widget = DeviceInfoWidget(self.current_device)
         self.content_box.append(device_widget)
         
-        # Show quick actions for current device
         actions_widget = QuickActionsWidget(self.current_device['device_id'], self.execute_command)
         self.content_box.append(actions_widget)
     
@@ -381,28 +409,26 @@ class ADBWidget(Gtk.Box):
         """Show no devices state"""
         no_devices_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
         no_devices_box.set_valign(Gtk.Align.CENTER)
-        no_devices_box.set_margin_top(50)
-        no_devices_box.set_margin_bottom(50)
+        no_devices_box.set_vexpand(True)
         
-        # Icon
-        icon = Gtk.Image.new_from_icon_name("phone-symbolic")
+        icon = Gtk.Image.new_from_icon_name("phone-disabled-symbolic")
         icon.set_pixel_size(64)
         icon.add_css_class("dim-label")
         
-        # Message
-        message_label = Gtk.Label(label="No ADB devices connected")
-        message_label.add_css_class("title-4")
+        message_label = Gtk.Label(label="No ADB Devices Connected")
+        message_label.add_css_class("title-large")
         message_label.add_css_class("dim-label")
         
-        # Instructions
+        instructions_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        instructions_box.set_halign(Gtk.Align.CENTER)
+        
         instructions = [
-            "1. Enable Developer Options on your device",
-            "2. Enable USB Debugging",
-            "3. Connect your device via USB or WiFi",
-            "4. Accept the debugging authorization"
+            "1. Enable Developer Options on your device.",
+            "2. Enable USB Debugging in Developer Options.",
+            "3. Connect your device via USB or Wi-Fi.",
+            "4. Authorize the debugging connection on your device."
         ]
         
-        instructions_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         for instruction in instructions:
             inst_label = Gtk.Label(label=instruction)
             inst_label.add_css_class("dim-label")
@@ -415,5 +441,6 @@ class ADBWidget(Gtk.Box):
         self.content_box.append(no_devices_box)
     
     def execute_command(self, device_id, command):
-        """Execute ADB command on device"""
-        self.command_queue.put((device_id, command))
+        """Queue an ADB command for execution"""
+        if device_id and command:
+            self.command_queue.put((device_id, command))
