@@ -231,7 +231,7 @@ Beautiful weather display with current conditions and forecasts.
 ## Configuration Files
 
 ### `.env` - Environment Configuration
-Simple configuration file for location-based services:
+Simple configuration file for location-based services (Example):
 ```
 LATITUDE=40.7128
 LONGITUDE=-74.0060
