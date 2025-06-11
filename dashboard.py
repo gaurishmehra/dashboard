@@ -10,6 +10,8 @@ warnings.filterwarnings("ignore")
 from media_player import MediaPlayerWidget
 from notifications import NotificationsWidget
 from adb import ADBWidget
+from bluetooth import BluetoothWidget
+from wifi import WiFiWidget
 
 class Dashboard(Adw.ApplicationWindow):
     def __init__(self, **kwargs):
@@ -84,10 +86,26 @@ class Dashboard(Adw.ApplicationWindow):
         self.adb_button.add_css_class("sidebar-button")
         self.adb_button.set_tooltip_text("ADB Controller")
         self.adb_button.connect("clicked", lambda b: self.switch_view("adb"))
+
+        self.bluetooth_button = Gtk.Button(icon_name="bluetooth-symbolic")
+        self.bluetooth_button.set_size_request(60, 60)
+        self.bluetooth_button.add_css_class("circular")
+        self.bluetooth_button.add_css_class("sidebar-button")
+        self.bluetooth_button.set_tooltip_text("Bluetooth")
+        self.bluetooth_button.connect("clicked", lambda b: self.switch_view("bluetooth"))
+
+        self.wifi_button = Gtk.Button(icon_name="network-wireless-symbolic")
+        self.wifi_button.set_size_request(60, 60)
+        self.wifi_button.add_css_class("circular")
+        self.wifi_button.add_css_class("sidebar-button")
+        self.wifi_button.set_tooltip_text("WiFi")
+        self.wifi_button.connect("clicked", lambda b: self.switch_view("wifi"))
         
         sidebar.append(self.media_button)
         sidebar.append(self.notifications_button)
         sidebar.append(self.adb_button)
+        sidebar.append(self.bluetooth_button)
+        sidebar.append(self.wifi_button)       
         
         # --- Content Area using Gtk.Stack ---
         self.content_stack = Gtk.Stack()
@@ -117,10 +135,15 @@ class Dashboard(Adw.ApplicationWindow):
             self.widgets["media"] = MediaPlayerWidget()
             self.widgets["notifications"] = NotificationsWidget()
             self.widgets["adb"] = ADBWidget()
+            self.widgets["bluetooth"] = BluetoothWidget()
+            self.widgets["wifi"] = WiFiWidget()
+    
             
             self.content_stack.add_named(self.widgets["media"], "media")
             self.content_stack.add_named(self.widgets["notifications"], "notifications")
             self.content_stack.add_named(self.widgets["adb"], "adb")
+            self.content_stack.add_named(self.widgets["bluetooth"], "bluetooth")
+            self.content_stack.add_named(self.widgets["wifi"], "wifi")      
 
             # Set initial view and ACTIVATE the first widget's background tasks.
             self.content_stack.set_visible_child_name("media")
@@ -167,7 +190,9 @@ class Dashboard(Adw.ApplicationWindow):
         buttons = {
             "media": self.media_button,
             "notifications": self.notifications_button,
-            "adb": self.adb_button
+            "adb": self.adb_button,
+            "bluetooth": self.bluetooth_button,
+            "wifi": self.wifi_button  
         }
         for name, button in buttons.items():
             if name == self.current_view_name:
