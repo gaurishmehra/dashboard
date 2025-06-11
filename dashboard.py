@@ -326,7 +326,7 @@ class Dashboard(Adw.ApplicationWindow):
 
         .hourly-card:hover {
             background: rgba(255, 255, 255, 0.08);
-            transform: scale(0.95);
+            transform: scale(0.97);
         }
 
         .hourly-time {
@@ -411,10 +411,10 @@ class Dashboard(Adw.ApplicationWindow):
         .volume-scale highlight { background: rgba(255, 255, 255, 0.6); border-radius: 10px; }
         .device-header { background: rgba(255, 255, 255, 0.05); border-radius: 16px; transition: all 150ms ease; padding: 12px 16px; }
         .info-tile { background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05)); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 12px; padding: 12px; transition: all 200ms ease; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1); }
-        .info-tile:hover { transform: scale(0.95); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2); }
+        .info-tile:hover { transform: scale(0.97); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2); }
         .section-title { font-size: 14px; font-weight: bold; color: rgba(255, 255, 255, 0.9); text-transform: uppercase; letter-spacing: 0.5px; }
         .action-button { background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 12px; color: rgba(255, 255, 255, 0.9); transition: all 150ms ease; }
-        .action-button:hover { background: rgba(255, 255, 255, 0.15); border-color: rgba(255, 255, 255, 0.3); transform: scale(0.95); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); }
+        .action-button:hover { background: rgba(255, 255, 255, 0.15); border-color: rgba(255, 255, 255, 0.3); transform: scale(0.97); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); }
 
         """)
         
