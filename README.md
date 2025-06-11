@@ -69,10 +69,10 @@ Current Features:
 - Quick access ADB
 - Wifi Controls
 - Bluetooth Controls
+- Weather Widget
 
 Todo:
 - Improve animations and overall UX
 - Add the option to choose which widgets to display
 - System monitoring widget (CPU, RAM, etc.)
-- Weather widget
 - Session management widget (logout, switch user, etc.)

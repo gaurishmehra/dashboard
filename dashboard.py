@@ -12,6 +12,7 @@ from notifications import NotificationsWidget
 from adb import ADBWidget
 from bluetooth import BluetoothWidget
 from wifi import WiFiWidget
+from weather import WeatherWidget  # Add weather widget import
 
 class Dashboard(Adw.ApplicationWindow):
     def __init__(self, **kwargs):
@@ -101,11 +102,20 @@ class Dashboard(Adw.ApplicationWindow):
         self.wifi_button.set_tooltip_text("WiFi")
         self.wifi_button.connect("clicked", lambda b: self.switch_view("wifi"))
         
+        # Add weather button
+        self.weather_button = Gtk.Button(icon_name="weather-clear-symbolic")
+        self.weather_button.set_size_request(60, 60)
+        self.weather_button.add_css_class("circular")
+        self.weather_button.add_css_class("sidebar-button")
+        self.weather_button.set_tooltip_text("Weather")
+        self.weather_button.connect("clicked", lambda b: self.switch_view("weather"))
+        
         sidebar.append(self.media_button)
         sidebar.append(self.notifications_button)
         sidebar.append(self.adb_button)
         sidebar.append(self.bluetooth_button)
-        sidebar.append(self.wifi_button)       
+        sidebar.append(self.wifi_button)
+        sidebar.append(self.weather_button)  # Add weather button to sidebar
         
         # --- Content Area using Gtk.Stack ---
         self.content_stack = Gtk.Stack()
@@ -137,13 +147,15 @@ class Dashboard(Adw.ApplicationWindow):
             self.widgets["adb"] = ADBWidget()
             self.widgets["bluetooth"] = BluetoothWidget()
             self.widgets["wifi"] = WiFiWidget()
+            self.widgets["weather"] = WeatherWidget()  # Add weather widget
     
             
             self.content_stack.add_named(self.widgets["media"], "media")
             self.content_stack.add_named(self.widgets["notifications"], "notifications")
             self.content_stack.add_named(self.widgets["adb"], "adb")
             self.content_stack.add_named(self.widgets["bluetooth"], "bluetooth")
-            self.content_stack.add_named(self.widgets["wifi"], "wifi")      
+            self.content_stack.add_named(self.widgets["wifi"], "wifi")
+            self.content_stack.add_named(self.widgets["weather"], "weather")  # Add to stack
 
             # Set initial view and ACTIVATE the first widget's background tasks.
             self.content_stack.set_visible_child_name("media")
@@ -186,13 +198,14 @@ class Dashboard(Adw.ApplicationWindow):
             print(f"Error switching view: {e}")
     
     def update_sidebar_buttons(self):
-        """Update button states based on the current view. (No change needed here)."""
+        """Update button states based on the current view."""
         buttons = {
             "media": self.media_button,
             "notifications": self.notifications_button,
             "adb": self.adb_button,
             "bluetooth": self.bluetooth_button,
-            "wifi": self.wifi_button  
+            "wifi": self.wifi_button,
+            "weather": self.weather_button  # Add weather button
         }
         for name, button in buttons.items():
             if name == self.current_view_name:
@@ -277,9 +290,125 @@ class Dashboard(Adw.ApplicationWindow):
             min-width: 8px;
             min-height: 20px;
         }
+
+        /* Weather Widget Styles */
+        .location-label {
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.7);
+            font-weight: 500;
+        }
+
+        .temperature-label {
+            font-size: 48px;
+            font-weight: bold;
+            color: white;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        .weather-desc {
+            font-size: 16px;
+            color: rgba(255, 255, 255, 0.9);
+            font-weight: 500;
+        }
+
+        .weather-detail-label {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.7);
+            font-weight: 500;
+        }
+
+        .weather-detail-value {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.95);
+            font-weight: bold;
+        }
+
+        /* Hourly Forecast Styles */
+        .hourly-scroll {
+            background: transparent;
+        }
+
+        .hourly-scroll scrollbar {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 4px;
+            min-height: 8px;
+        }
+
+        .hourly-scroll scrollbar slider {
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 4px;
+            min-height: 8px;
+        }
+
+        .hourly-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 12px 8px;
+            transition: all 200ms ease;
+        }
+
+        .hourly-card:hover {
+            background: rgba(255, 255, 255, 0.08);
+            transform: scale(0.95); /* MODIFIED: Changed from translateY for stable layout */
+        }
+
+        .hourly-time {
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.7);
+            font-weight: 500;
+        }
+
+        .hourly-temp {
+            font-size: 13px;
+            color: white;
+            font-weight: bold;
+        }
+
+        .hourly-precip {
+            font-size: 9px;
+            color: rgba(100, 150, 255, 0.9);
+            font-weight: 500;
+        }
+
+        /* Daily Forecast Styles */
+        .daily-row {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 12px 16px;
+            transition: all 200ms ease;
+        }
+
+        .daily-row:hover {
+            background: rgba(255, 255, 255, 0.06);
+            border-color: rgba(255, 255, 255, 0.15);
+        }
+
+        .daily-day {
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.9);
+            font-weight: 500;
+        }
+
+        .daily-temp-max {
+            font-size: 14px;
+            color: white;
+            font-weight: bold;
+        }
+
+        .daily-temp-min {
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .daily-precip {
+            font-size: 11px;
+            color: rgba(100, 150, 255, 0.9);
+            font-weight: 500;
+        }
         
         /* --- YOUR EXISTING STYLES ARE PRESERVED BELOW --- */
-        /* This ensures the specific look of your widgets remains unchanged. */
         
         .invisible-scroll { background: transparent; }
         .invisible-scroll scrollbar { min-width: 0px; opacity: 0; }
@@ -309,10 +438,10 @@ class Dashboard(Adw.ApplicationWindow):
         .volume-scale highlight { background: rgba(255, 255, 255, 0.6); border-radius: 10px; }
         .device-header { background: rgba(255, 255, 255, 0.05); border-radius: 16px; transition: all 150ms ease; padding: 12px 16px; }
         .info-tile { background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05)); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 12px; padding: 12px; transition: all 200ms ease; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1); }
-        .info-tile:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2); }
+        .info-tile:hover { transform: scale(0.95); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2); } /* MODIFIED */
         .section-title { font-size: 14px; font-weight: bold; color: rgba(255, 255, 255, 0.9); text-transform: uppercase; letter-spacing: 0.5px; }
         .action-button { background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 12px; color: rgba(255, 255, 255, 0.9); transition: all 150ms ease; }
-        .action-button:hover { background: rgba(255, 255, 255, 0.15); border-color: rgba(255, 255, 255, 0.3); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); }
+        .action-button:hover { background: rgba(255, 255, 255, 0.15); border-color: rgba(255, 255, 255, 0.3); transform: scale(0.95); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); } /* MODIFIED */
 
         """)
         
