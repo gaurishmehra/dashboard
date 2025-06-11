@@ -10,7 +10,9 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
+# Defines the main Gtk.Box that holds and manages all weather-related UI and logic.
 class WeatherWidget(Gtk.Box):
+    # Initializes the weather widget, setting up its state and building the initial user interface.
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         
@@ -23,8 +25,8 @@ class WeatherWidget(Gtk.Box):
         self.load_config()
         self.create_ui()
     
+    # Reads latitude and longitude from a .env file located in the same directory as the script.
     def load_config(self):
-        # Using realpath is more robust, especially if running via symlinks
         env_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), '.env')
         self.latitude = None
         self.longitude = None
@@ -40,6 +42,7 @@ class WeatherWidget(Gtk.Box):
             print(f"Error loading .env file: {e}")
             print("Please create a .env file with LATITUDE and LONGITUDE values")
     
+    # Starts the widget's activity, triggering the first data fetch and scheduling periodic updates.
     def activate(self):
         if self.is_active: 
             return
@@ -48,6 +51,7 @@ class WeatherWidget(Gtk.Box):
         self.fetch_weather_data()
         self.update_timeout_id = GLib.timeout_add_seconds(600, self.fetch_weather_data)
     
+    # Stops the widget's activity, cancelling any scheduled data updates to save resources.
     def deactivate(self):
         if not self.is_active:
             return
@@ -57,6 +61,7 @@ class WeatherWidget(Gtk.Box):
             GLib.source_remove(self.update_timeout_id)
             self.update_timeout_id = None
     
+    # Constructs the static skeleton of the widget, including the header, title, and a scrollable area for content.
     def create_ui(self):
         header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12,
                              margin_top=20, margin_bottom=16, margin_start=20, margin_end=20)
@@ -85,9 +90,9 @@ class WeatherWidget(Gtk.Box):
         self.content_scrolled.set_child(self.content_box)
         self.append(self.content_scrolled)
         
-        # Display loading spinner initially
         self.show_loading()
     
+    # Populates the content area with weather data. It clears any existing content and then builds the UI sections for current, hourly, and daily forecasts.
     def create_weather_ui(self):
         for child in list(self.content_box):
             self.content_box.remove(child)
@@ -110,6 +115,7 @@ class WeatherWidget(Gtk.Box):
             print(f"FATAL: Error building weather UI from data: {e}")
             self.show_error("Data Error", "Could not parse weather data.")
 
+    # Displays a loading spinner to indicate that data is being fetched in the background.
     def show_loading(self):
         for child in list(self.content_box):
             self.content_box.remove(child)
@@ -122,6 +128,7 @@ class WeatherWidget(Gtk.Box):
         loading_box.append(loading_label)
         self.content_box.append(loading_box)
     
+    # Displays a user-friendly error message if data fetching or processing fails.
     def show_error(self, title, message):
         for child in list(self.content_box):
             self.content_box.remove(child)
@@ -137,6 +144,7 @@ class WeatherWidget(Gtk.Box):
         error_box.append(error_message)
         self.content_box.append(error_box)
     
+    # Builds the main card displaying the current weather conditions, such as temperature, icon, and other details.
     def create_current_weather(self):
         current_weather = self.weather_data.get('current', {})
         weather_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16, css_classes=["info-tile"])
@@ -177,17 +185,15 @@ class WeatherWidget(Gtk.Box):
         weather_card.append(details_grid)
         self.content_box.append(weather_card)
     
+    # A helper to locate the array index for the current hour within the API's hourly forecast data.
     def find_current_hour_index(self, current_time_str, hourly_times):
-        """Find the index of the current hour in hourly forecast data with robust matching."""
         if not current_time_str or not hourly_times:
             return 0
         
         try:
-            # Parse the current time
             current_dt = datetime.fromisoformat(current_time_str.replace('Z', '+00:00'))
             current_hour = current_dt.replace(minute=0, second=0, microsecond=0)
             
-            # Try to find exact match first
             for i, time_str in enumerate(hourly_times):
                 try:
                     hourly_dt = datetime.fromisoformat(time_str.replace('Z', '+00:00'))
@@ -198,7 +204,6 @@ class WeatherWidget(Gtk.Box):
                 except (ValueError, TypeError):
                     continue
             
-            # If no exact match, find the closest hour
             closest_index = 0
             min_diff = float('inf')
             
@@ -220,6 +225,7 @@ class WeatherWidget(Gtk.Box):
             print(f"Error parsing current time '{current_time_str}': {e}")
             return 0
     
+    # Creates the horizontally scrollable section for the 24-hour forecast, starting from the current hour.
     def create_hourly_forecast(self):
         hourly_label = Gtk.Label(label="24-Hour Forecast", css_classes=["section-title"], halign=Gtk.Align.START, margin_top=8)
         self.content_box.append(hourly_label)
@@ -243,83 +249,11 @@ class WeatherWidget(Gtk.Box):
             print("Hourly forecast skipped: missing required data from API.")
             return
 
-        # Use robust time matching
-        current_index = self.find_current_hour_index(current_time_str, times)
-        current_hour_widget = None
-        
-        # Show 12 hours before and 12 hours after current time (24 total)
-        # This ensures proper chronological order around day transitions
-        start_index = max(0, current_index - 12)
-        end_index = min(len(times), current_index + 13)  # +13 to include current + 12 future
-        
-        # If we can't get 12 hours before, extend forward
-        if current_index - 12 < 0:
-            end_index = min(len(times), start_index + 24)
-        
-        # If we can't get 12 hours after, extend backward  
-        if current_index + 13 > len(times):
-            start_index = max(0, end_index - 24)
-
-        for i in range(start_index, end_index):
-            is_current = (i == current_index)
-            try:
-                hour_card = self.create_hourly_card(
-                    datetime.fromisoformat(times[i].replace('Z', '+00:00')), 
-                    temps[i], weather_codes[i], 
-                    precipitation[i] if i < len(precipitation) else 0,
-                    is_current=is_current
-                )
-                hourly_box.append(hour_card)
-                
-                if is_current:
-                    current_hour_widget = hour_card
-            except (ValueError, TypeError) as e:
-                print(f"Error creating hourly card for index {i}: {e}")
-                continue
-        
-        hourly_scrolled.set_child(hourly_box)
-        self.content_box.append(hourly_scrolled)
-        
-        if current_hour_widget:
-            def center_current_hour_in_view():
-                GLib.idle_add(current_hour_widget.scroll_to, 0.5, 0.5, True, 0.5, 0.5)
-                return GLib.SOURCE_REMOVE
-            GLib.timeout_add(150, center_current_hour_in_view)
-
-    def create_hourly_forecast(self):
-        hourly_label = Gtk.Label(label="24-Hour Forecast", css_classes=["section-title"], halign=Gtk.Align.START, margin_top=8)
-        self.content_box.append(hourly_label)
-        
-        hourly_scrolled = Gtk.ScrolledWindow(css_classes=["hourly-scroll"])
-        hourly_scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
-        hourly_scrolled.set_max_content_height(140)
-        
-        hourly_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        hourly_box.set_margin_start(12)
-        hourly_box.set_margin_end(12)
-        
-        hourly_data = self.forecast_data.get('hourly', {})
-        times = hourly_data.get('time', [])
-        temps = hourly_data.get('temperature_2m', [])
-        weather_codes = hourly_data.get('weather_code', [])
-        precipitation = hourly_data.get('precipitation_probability', [])
-        
-        current_time_str = self.weather_data.get('current', {}).get('time')
-        if not all([times, temps, weather_codes, precipitation]):
-            print("Hourly forecast skipped: missing required data from API.")
-            return
-
-        # Use robust time matching
         current_index = self.find_current_hour_index(current_time_str, times)
         
-        # CHANGE: Start from current hour and show next 23 hours (24 total)
-        # This ensures "Now" is always first (leftmost) in the scroll view
         start_index = current_index
         end_index = min(len(times), current_index + 24)
         
-        # If we don't have enough future hours, we'll just show what we have
-        # (API typically provides 7+ days, so this should rarely be an issue)
-        
         for i in range(start_index, end_index):
             is_current = (i == current_index)
             try:
@@ -336,17 +270,14 @@ class WeatherWidget(Gtk.Box):
         
         hourly_scrolled.set_child(hourly_box)
         self.content_box.append(hourly_scrolled)
-        
-        # REMOVED: The auto-scrolling code since "Now" is already at the start
-        # No need to scroll to center the current hour anymore
 
+    # Creates a single, small vertical box representing one hour in the forecast.
     def create_hourly_card(self, time, temp, weather_code, precipitation, is_current=False):
         hour_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, css_classes=["hourly-card"], halign=Gtk.Align.CENTER)
         if is_current:
             hour_card.add_css_class("current-hour")
         hour_card.set_size_request(80, -1)
         
-        # Show time with better day transition handling
         if is_current:
             time_text = "Now"
         else:
@@ -357,11 +288,10 @@ class WeatherWidget(Gtk.Box):
                 time_date = time.date()
                 
                 if time_date != current_date:
-                    # Different day - show day indicator
                     if time_date < current_date:
-                        time_text = f"{time.strftime('%H:%M')}\n-1d"  # Yesterday
+                        time_text = f"{time.strftime('%H:%M')}\n-1d"
                     else:
-                        time_text = f"{time.strftime('%H:%M')}\n+1d"  # Tomorrow
+                        time_text = f"{time.strftime('%H:%M')}\n+1d"
                 else:
                     time_text = time.strftime("%H:%M")
             except (ValueError, TypeError):
@@ -382,6 +312,8 @@ class WeatherWidget(Gtk.Box):
         hour_card.append(temp_label)
         hour_card.append(precip_label)
         return hour_card
+
+    # Builds the list view for the 7-day weather forecast.
     def create_daily_forecast(self):
         forecast_label = Gtk.Label(label="7-Day Forecast", css_classes=["section-title"], halign=Gtk.Align.START, margin_top=8)
         self.content_box.append(forecast_label)
@@ -404,6 +336,7 @@ class WeatherWidget(Gtk.Box):
         
         self.content_box.append(daily_container)
     
+    # Creates a single row widget for one day in the 7-day forecast list.
     def create_daily_row(self, date_str, max_temp, min_temp, weather_code, precipitation):
         day_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12, css_classes=["daily-row"])
         day_row.set_margin_start(8)
@@ -450,6 +383,7 @@ class WeatherWidget(Gtk.Box):
         day_row.append(temp_box)
         return day_row
     
+    # Fetches weather and location data from web APIs in a background thread to prevent freezing the UI.
     def fetch_weather_data(self):
         if not self.latitude or not self.longitude:
             GLib.idle_add(self.create_weather_ui)
@@ -459,7 +393,6 @@ class WeatherWidget(Gtk.Box):
 
         def fetch_in_thread():
             try:
-                # Construct parameters safely in a list (from old code)
                 current_params = [
                     "temperature_2m", "relative_humidity_2m", "apparent_temperature",
                     "surface_pressure", "wind_speed_10m", "weather_code", "is_day"
@@ -470,7 +403,7 @@ class WeatherWidget(Gtk.Box):
                 weather_url = (
                     f"https://api.open-meteo.com/v1/forecast?"
                     f"latitude={self.latitude}&longitude={self.longitude}"
-                    f"&current={','.join(current_params)}"
+                    f"¤t={','.join(current_params)}"
                     f"&hourly={','.join(hourly_params)}"
                     f"&daily={','.join(daily_params)}"
                     f"&timezone=auto&forecast_days=7"
@@ -483,7 +416,6 @@ class WeatherWidget(Gtk.Box):
                 self.weather_data = data
                 self.forecast_data = data
                 
-                # Fetch location in parallel but don't block weather update
                 try:
                     reverse_geo_url = f"https://api.bigdatacloud.net/data/reverse-geocode-client?latitude={self.latitude}&longitude={self.longitude}&localityLanguage=en"
                     geo_response = requests.get(reverse_geo_url, timeout=5)
@@ -515,14 +447,14 @@ class WeatherWidget(Gtk.Box):
         thread.start()
         return GLib.SOURCE_CONTINUE
     
+    # Updates the UI on the main thread after the background data fetch is complete.
     def update_location_and_weather(self):
         city_name = self.location_data.get('city', 'Unknown Location')
         self.location_label.set_text(city_name)
         self.create_weather_ui()
     
+    # Translates a weather code from the API into a corresponding symbolic icon name for GTK.
     def get_weather_icon(self, weather_code, is_hourly=False):
-        # For hourly forecast, we can't reliably know if it's day or night.
-        # So we default to the day icon. For current weather, we use the is_day flag.
         is_day = self.weather_data.get('current', {}).get('is_day', 1) == 1 if not is_hourly else True
         
         icon_map = {
@@ -547,6 +479,7 @@ class WeatherWidget(Gtk.Box):
         }
         return icon_map.get(weather_code, "weather-clear-symbolic")
     
+    # Translates a weather code from the API into a human-readable description.
     def get_weather_description(self, weather_code):
         descriptions = {
             0: "Clear", 1: "Mainly Clear", 2: "Partly Cloudy", 3: "Overcast",

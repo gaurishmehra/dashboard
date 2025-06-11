@@ -6,67 +6,67 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-# These will be refactored in the next steps. For now, they are just imported.
 from media_player import MediaPlayerWidget
 from notifications import NotificationsWidget
 from adb import ADBWidget
 from bluetooth import BluetoothWidget
 from wifi import WiFiWidget
-from weather import WeatherWidget  # Add weather widget import
+from weather import WeatherWidget
 
+# This class defines the main window for the application. It holds the overall
+# structure, including the sidebar and the content area, and manages switching
+# between the different widget views.
 class Dashboard(Adw.ApplicationWindow):
+    # This is the constructor for the window. It sets up initial properties
+    # like the title and size, connects the escape key for closing the window,
+    # and calls the method to build the user interface.
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         
         self.set_title("Media Controller")
         self.set_default_size(800, 600)
-        # Use set_size_request for a minimum size, not a fixed one.
-        # This works better with tiling window managers like Hyprland.
         self.set_size_request(800, 600) 
         
         self.current_view_name = "media"
-        self.current_widget = None # To track the currently active widget instance
-        self.widgets = {} # Dictionary to hold widget instances
+        self.current_widget = None
+        self.widgets = {}
         
-        # Escape key handler
         key_controller = Gtk.EventControllerKey()
         key_controller.connect("key-pressed", self.on_key_pressed)
         self.add_controller(key_controller)
         
         self.create_ui()
     
+    # This function handles key press events for the main window. It specifically
+    # checks if the Escape key was pressed and closes the application if it was.
     def on_key_pressed(self, controller, keyval, keycode, state):
-        """Handle escape key to close the application."""
         if keyval == Gdk.KEY_Escape:
             self.close()
             return True
         return False
     
+    # This method builds the entire user interface, including the modern layout
+    # with a sidebar and a content area (Gtk.Stack). It creates the navigation
+    # buttons and defers the creation of the actual content widgets to improve
+    # the application's startup time.
     def create_ui(self):
-        # **FIX 1: Use Adw.ToastOverlay and Adw.Leaflet for a modern layout.**
-        # An Adw.Leaflet is the modern, standard way to create a sidebar+content view.
-        # It's more efficient and handles transitions better than a manual Gtk.Box.
         toast_overlay = Adw.ToastOverlay()
         self.set_content(toast_overlay)
         
         leaflet = Adw.Leaflet()
-        leaflet.set_can_navigate_back(True) # For future adaptive improvements
+        leaflet.set_can_navigate_back(True)
         toast_overlay.set_child(leaflet)
         
-        # **FIX 2: A more professional sidebar.**
         sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        sidebar.set_size_request(90, -1) # Slightly wider for better icon spacing
+        sidebar.set_size_request(90, -1)
         sidebar.add_css_class("sidebar")
         
-        # **FIX 3: Better padding and alignment for a cleaner look.**
         sidebar.set_margin_top(20)
         sidebar.set_margin_bottom(20)
         sidebar.set_margin_start(10)
         sidebar.set_margin_end(10)
-        sidebar.set_valign(Gtk.Align.CENTER) # Vertically center the buttons
+        sidebar.set_valign(Gtk.Align.CENTER)
 
-        # --- Sidebar Buttons ---
-        # No functional change here, just adding to the new sidebar structure.
         self.media_button = Gtk.Button(icon_name="audio-headphones-symbolic")
         self.media_button.set_size_request(60, 60)
         self.media_button.add_css_class("circular")
@@ -102,7 +102,6 @@ class Dashboard(Adw.ApplicationWindow):
         self.wifi_button.set_tooltip_text("WiFi")
         self.wifi_button.connect("clicked", lambda b: self.switch_view("wifi"))
         
-        # Add weather button
         self.weather_button = Gtk.Button(icon_name="weather-clear-symbolic")
         self.weather_button.set_size_request(60, 60)
         self.weather_button.add_css_class("circular")
@@ -115,52 +114,41 @@ class Dashboard(Adw.ApplicationWindow):
         sidebar.append(self.adb_button)
         sidebar.append(self.bluetooth_button)
         sidebar.append(self.wifi_button)
-        sidebar.append(self.weather_button)  # Add weather button to sidebar
+        sidebar.append(self.weather_button)
         
-        # --- Content Area using Gtk.Stack ---
         self.content_stack = Gtk.Stack()
         self.content_stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
-        self.content_stack.set_transition_duration(300) # A slightly slower, smoother transition
+        self.content_stack.set_transition_duration(300)
         
-        # Add sidebar and content to the leaflet
         leaflet.append(sidebar)
         leaflet.append(self.content_stack)
         
-        # **STARTUP SPEED FIX:** Defer widget creation slightly. This allows the main window
-        # to draw itself instantly, giving the perception of a faster launch.
         GLib.timeout_add(50, self.create_and_activate_initial_widgets)
         
-        # **FIX 4: Enhanced CSS for a premium look.**
-        # This CSS is added to complement your existing style, not replace it.
         self.apply_enhanced_css()
 
+    # This function is called after a short delay to avoid blocking the UI thread on startup.
+    # It creates instances of all the different view widgets, adds them to the content stack,
+    # and then activates the initial, default view.
     def create_and_activate_initial_widgets(self):
-        """
-        Creates the widget instances and adds them to the stack.
-        Crucially, it now only ACTIVATES the initial view, preventing others from running.
-        """
         try:
-            # Create instances but don't start their background work yet.
-            # The background work will be started by the new activate() methods.
             self.widgets["media"] = MediaPlayerWidget()
             self.widgets["notifications"] = NotificationsWidget()
             self.widgets["adb"] = ADBWidget()
             self.widgets["bluetooth"] = BluetoothWidget()
             self.widgets["wifi"] = WiFiWidget()
-            self.widgets["weather"] = WeatherWidget()  # Add weather widget
+            self.widgets["weather"] = WeatherWidget()
     
-            
             self.content_stack.add_named(self.widgets["media"], "media")
             self.content_stack.add_named(self.widgets["notifications"], "notifications")
             self.content_stack.add_named(self.widgets["adb"], "adb")
             self.content_stack.add_named(self.widgets["bluetooth"], "bluetooth")
             self.content_stack.add_named(self.widgets["wifi"], "wifi")
-            self.content_stack.add_named(self.widgets["weather"], "weather")  # Add to stack
+            self.content_stack.add_named(self.widgets["weather"], "weather")
 
-            # Set initial view and ACTIVATE the first widget's background tasks.
             self.content_stack.set_visible_child_name("media")
             self.current_widget = self.widgets["media"]
-            # This is a new method we will add to the other widget files.
+
             if hasattr(self.current_widget, 'activate'):
                 self.current_widget.activate() 
             
@@ -169,27 +157,24 @@ class Dashboard(Adw.ApplicationWindow):
         except Exception as e:
             print(f"Error creating widgets: {e}")
         
-        return GLib.SOURCE_REMOVE # Prevents the timeout from running again.
+        return GLib.SOURCE_REMOVE
     
+    # This is the core logic for changing views. It deactivates the background tasks
+    # of the old widget, switches the visible page in the Gtk.Stack, and then activates
+    # the background tasks for the new widget. This ensures only one widget is active
+    # at a time, preventing lag and unnecessary resource usage.
     def switch_view(self, view_name):
-        """
-        **THE CORE LAG FIX:** This function now handles deactivating the old view
-        and activating the new one, ensuring only one widget is polling in the background.
-        """
         if view_name == self.current_view_name:
-            return # Don't do anything if we're already on this view
+            return
 
         try:
-            # 1. Deactivate the current widget's background tasks to stop lag.
             if self.current_widget and hasattr(self.current_widget, 'deactivate'):
                 self.current_widget.deactivate()
 
-            # 2. Switch the UI
             self.current_view_name = view_name
             self.content_stack.set_visible_child_name(view_name)
             self.update_sidebar_buttons()
 
-            # 3. Activate the new widget's background tasks.
             self.current_widget = self.widgets.get(view_name)
             if self.current_widget and hasattr(self.current_widget, 'activate'):
                 self.current_widget.activate()
@@ -197,15 +182,17 @@ class Dashboard(Adw.ApplicationWindow):
         except Exception as e:
             print(f"Error switching view: {e}")
     
+    # This is a helper function that visually updates the sidebar buttons.
+    # It adds a special 'active' CSS class to the button corresponding to the
+    # currently displayed view, making it easy for the user to see where they are.
     def update_sidebar_buttons(self):
-        """Update button states based on the current view."""
         buttons = {
             "media": self.media_button,
             "notifications": self.notifications_button,
             "adb": self.adb_button,
             "bluetooth": self.bluetooth_button,
             "wifi": self.wifi_button,
-            "weather": self.weather_button  # Add weather button
+            "weather": self.weather_button
         }
         for name, button in buttons.items():
             if name == self.current_view_name:
@@ -213,16 +200,12 @@ class Dashboard(Adw.ApplicationWindow):
             else:
                 button.remove_css_class("active")
 
+    # This method loads and applies all the custom CSS styling for the application.
+    # It defines the look and feel of the window, sidebar, buttons, and all other
+    # components to create a polished and consistent user experience.
     def apply_enhanced_css(self):
-        """
-        Enhanced CSS for a professional look. It PREPENDS new styles to your
-        existing ones, ensuring your specific widget styles are preserved.
-        """
         css_provider = Gtk.CssProvider()
         css_provider.load_from_data(b"""
-        /* --- NEW STYLES for a more polished look & feel --- */
-
-        /* Window: Softer shadow for depth, works great with Hyprland transparency. */
         window {
             background: rgba(30, 30, 35, 0.7);
             border-radius: 16px;
@@ -230,20 +213,18 @@ class Dashboard(Adw.ApplicationWindow):
             border: 1px solid rgba(255, 255, 255, 0.1);
         }
         
-        /* Sidebar: Subtle gradient and a soft border for separation. */
         .sidebar {
             background-image: linear-gradient(to bottom, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
-            border-radius: 12px; /* Rounded corners for the sidebar itself */
+            border-radius: 12px;
             border-right: 1px solid rgba(255, 255, 255, 0.1);
         }
         
-        /* Sidebar Buttons: Smoother transitions and a refined look. */
         .sidebar-button {
             background: transparent;
             border: 1px solid transparent;
             color: rgba(255, 255, 255, 0.6);
             transition: all 250ms ease-in-out;
-            border-radius: 30px; /* Perfect circle */
+            border-radius: 30px;
         }
 
         .sidebar-button:hover {
@@ -251,7 +232,6 @@ class Dashboard(Adw.ApplicationWindow):
             color: rgba(255, 255, 255, 0.9);
         }
         
-        /* Active Sidebar Button: A prominent "glow" effect. */
         .sidebar-button.active {
             background: rgba(80, 160, 255, 0.25);
             color: white;
@@ -259,7 +239,6 @@ class Dashboard(Adw.ApplicationWindow):
             box-shadow: 0 0 12px rgba(80, 160, 255, 0.5);
         }
         
-        /* General Widget Styling for consistency */
         searchbar, entry {
             background: rgba(0, 0, 0, 0.2);
             border: 1px solid rgba(255, 255, 255, 0.15);
@@ -274,14 +253,13 @@ class Dashboard(Adw.ApplicationWindow):
             box-shadow: 0 0 0 3px rgba(80, 160, 255, 0.2);
         }
         
-        /* Scrollbars that are visible but not intrusive, enhancing your design */
-        .notification-body-scroll { background: transparent; } /* Your class */
+        .notification-body-scroll { background: transparent; }
         
         .notification-body-scroll scrollbar {
             background: rgba(0, 0, 0, 0.2);
             border-radius: 4px;
             min-width: 8px;
-            opacity: 1; /* Make it visible */
+            opacity: 1;
         }
 
         .notification-body-scroll scrollbar slider {
@@ -291,7 +269,6 @@ class Dashboard(Adw.ApplicationWindow):
             min-height: 20px;
         }
 
-        /* Weather Widget Styles */
         .location-label {
             font-size: 13px;
             color: rgba(255, 255, 255, 0.7);
@@ -323,7 +300,6 @@ class Dashboard(Adw.ApplicationWindow):
             font-weight: bold;
         }
 
-        /* Hourly Forecast Styles */
         .hourly-scroll {
             background: transparent;
         }
@@ -350,7 +326,7 @@ class Dashboard(Adw.ApplicationWindow):
 
         .hourly-card:hover {
             background: rgba(255, 255, 255, 0.08);
-            transform: scale(0.95); /* MODIFIED: Changed from translateY for stable layout */
+            transform: scale(0.95);
         }
 
         .hourly-time {
@@ -371,7 +347,6 @@ class Dashboard(Adw.ApplicationWindow):
             font-weight: 500;
         }
 
-        /* Daily Forecast Styles */
         .daily-row {
             background: rgba(255, 255, 255, 0.03);
             border: 1px solid rgba(255, 255, 255, 0.08);
@@ -408,8 +383,6 @@ class Dashboard(Adw.ApplicationWindow):
             font-weight: 500;
         }
         
-        /* --- YOUR EXISTING STYLES ARE PRESERVED BELOW --- */
-        
         .invisible-scroll { background: transparent; }
         .invisible-scroll scrollbar { min-width: 0px; opacity: 0; }
         .invisible-scroll scrollbar slider { min-width: 0px; opacity: 0; }
@@ -438,10 +411,10 @@ class Dashboard(Adw.ApplicationWindow):
         .volume-scale highlight { background: rgba(255, 255, 255, 0.6); border-radius: 10px; }
         .device-header { background: rgba(255, 255, 255, 0.05); border-radius: 16px; transition: all 150ms ease; padding: 12px 16px; }
         .info-tile { background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05)); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 12px; padding: 12px; transition: all 200ms ease; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1); }
-        .info-tile:hover { transform: scale(0.95); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2); } /* MODIFIED */
+        .info-tile:hover { transform: scale(0.95); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2); }
         .section-title { font-size: 14px; font-weight: bold; color: rgba(255, 255, 255, 0.9); text-transform: uppercase; letter-spacing: 0.5px; }
         .action-button { background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 12px; color: rgba(255, 255, 255, 0.9); transition: all 150ms ease; }
-        .action-button:hover { background: rgba(255, 255, 255, 0.15); border-color: rgba(255, 255, 255, 0.3); transform: scale(0.95); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); } /* MODIFIED */
+        .action-button:hover { background: rgba(255, 255, 255, 0.15); border-color: rgba(255, 255, 255, 0.3); transform: scale(0.95); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); }
 
         """)
         
@@ -451,11 +424,19 @@ class Dashboard(Adw.ApplicationWindow):
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
 
+# This is the main application class that Gtk uses to manage the app's lifecycle.
+# It ensures the application has a unique ID and connects the 'activate' signal,
+# which is the primary starting point for the app.
 class DashboardApp(Adw.Application):
+    # The constructor for the application class. It sets the unique application ID
+    # required by Gtk and connects the 'activate' signal to the on_activate method.
     def __init__(self, **kwargs):
         super().__init__(application_id="com.gaurish.Dashboard", **kwargs)
         self.connect('activate', self.on_activate)
     
+    # This method is automatically called by Gtk when the application is launched.
+    # Its main job is to create an instance of our main Dashboard window and show it
+    # to the user.
     def on_activate(self, app):
         try:
             self.win = Dashboard(application=app)
@@ -463,7 +444,8 @@ class DashboardApp(Adw.Application):
         except Exception as e:
             print(f"Error creating dashboard: {e}")
 
-# This remains the same, it's standard and correct.
+# This is the main entry point function for the script. It creates an
+# instance of our DashboardApp and tells it to run, starting the Gtk event loop.
 def main():
     try:
         app = DashboardApp()
