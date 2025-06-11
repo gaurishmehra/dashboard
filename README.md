@@ -18,6 +18,10 @@ How to use
    ```bash
     ./dunst_log.py &
    ```
+   You should ideally put the script in the hyprland config or make a systemd service for it.
+   ```bash
+   exec-once = /path/to/dunst_log.py
+   ```
 4. Run the dashboard:
    ```bash
    python dashboard.py
