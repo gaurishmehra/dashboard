@@ -8,6 +8,7 @@ import re
 import threading
 import queue
 import warnings
+import os
 
 warnings.filterwarnings("ignore")
 
@@ -349,59 +350,77 @@ class BluetoothWidget(Gtk.Box):
 
         return "unknown"
 
-    # Attempts to find a device's battery level using several different methods,
-    # since there is no single, reliable way to get this information.
+    # This function attempts to find the battery level of a device, correctly parsing
+    # both decimal and hexadecimal values from the system.
     def get_battery_level(self, mac, name):
-        battery_level = None
+        print(f"Getting battery level for {name} ({mac})")
+        mac_formatted = mac.replace(':', '_')
 
+        # Method 1: Try D-Bus directly using gdbus (most reliable)
+        try:
+            cmd = (
+                f"gdbus call --system --dest org.bluez "
+                f"--object-path /org/bluez/hci0/dev_{mac_formatted} "
+                f"--method org.freedesktop.DBus.Properties.Get "
+                f"org.bluez.Battery1 Percentage"
+            )
+            dbus_output = self.run_bluetooth_command(f"{cmd} 2>/dev/null")
+
+            if dbus_output:
+                print(f"D-Bus output for {name}: {dbus_output}")
+                # Updated regex to capture hex (0x..) or decimal (\d+) values
+                match = re.search(r'(?:byte|uint8)\s+(0x[0-9a-fA-F]+|\d+)', dbus_output)
+                if match:
+                    value_str = match.group(1)
+                    # int(value, 0) automatically handles '0x' prefixes for hex
+                    battery_level = int(value_str, 0)
+                    if 0 <= battery_level <= 100:
+                        print(f"Battery found via D-Bus: {battery_level}% for {name} (parsed from '{value_str}')")
+                        return battery_level
+        except Exception as e:
+            print(f"Error querying D-Bus for battery: {e}")
+
+        # Method 2: Try bluetoothctl info (good fallback, also handles hex/dec)
         try:
             info_output = self.run_bluetooth_command(f"bluetoothctl info {mac}")
-            battery_match = re.search(r'Battery Percentage: \(0x\w+\) (\d+)', info_output)
-            if battery_match:
-                battery_level = int(battery_match.group(1))
-                print(f"Battery via bluetoothctl info: {battery_level}% for {name}")
-                return battery_level
-
-            upower_output = self.run_bluetooth_command("upower -i $(upower -e | grep -i BAT)")
-            if upower_output:
-                percentage_match = re.search(r'percentage:\s+(\d+)%', upower_output)
-                if percentage_match:
-                    battery_level = int(percentage_match.group(1))
-                    print(f"Battery via UPower: {battery_level}% for {name}")
-                    return battery_level
-
-            dbus_cmd = f"dbus-send --system --print-reply --dest=org.bluez /org/bluez/hci0/dev_{mac.replace(':', '_')} org.freedesktop.DBus.Properties.Get string:org.bluez.Battery1 string:Percentage 2>/dev/null"
-            dbus_output = self.run_bluetooth_command(dbus_cmd)
-            if dbus_output:
-                dbus_match = re.search(r'byte (\d+)', dbus_output)
-                if dbus_match:
-                    battery_level = int(dbus_match.group(1))
-                    print(f"Battery via D-Bus: {battery_level}% for {name}")
-                    return battery_level
-
-            power_supply_output = self.run_bluetooth_command("find /sys/class/power_supply/ -name '*' -type d 2>/dev/null")
-            for line in power_supply_output.split('\n'):
-                if 'bluetooth' in line.lower() or mac.replace(':', '').lower() in line.lower():
-                    capacity_file = f"{line}/capacity"
-                    capacity_output = self.run_bluetooth_command(f"cat {capacity_file} 2>/dev/null")
-                    if capacity_output.isdigit():
-                        battery_level = int(capacity_output)
-                        print(f"Battery via /sys: {battery_level}% for {name}")
+            if info_output:
+                # First, try to find the simple decimal value in parentheses, e.g. (74)
+                match = re.search(r'Battery Percentage:.*?\((d+)\)', info_output)
+                if match:
+                    battery_level = int(match.group(1))
+                    if 0 <= battery_level <= 100:
+                        print(f"Battery found via bluetoothctl (decimal): {battery_level}% for {name}")
                         return battery_level
 
-            if any(word in name.lower() for word in ['headphone', 'headset', 'buds', 'airpods']):
-                custom_output = self.run_bluetooth_command(f"bluetoothctl info {mac} | grep -i battery")
-                if custom_output:
-                    numbers = re.findall(r'\d+', custom_output)
-                    if numbers:
-                        potential_battery = int(numbers[-1])
-                        if 0 <= potential_battery <= 100:
-                            print(f"Battery via custom parsing: {potential_battery}% for {name}")
-                            return potential_battery
-
+                # If not found, try to parse the main value which could be hex or dec
+                match = re.search(r'Battery Percentage:\s+(0x[0-9a-fA-F]+|\d+)', info_output)
+                if match:
+                    value_str = match.group(1)
+                    battery_level = int(value_str, 0)
+                    if 0 <= battery_level <= 100:
+                        print(f"Battery found via bluetoothctl (hex/dec): {battery_level}% for {name} (parsed from '{value_str}')")
+                        return battery_level
         except Exception as e:
-            print(f"Error getting battery for {name} ({mac}): {e}")
+            print(f"Error querying bluetoothctl for battery: {e}")
 
+        # Method 3: Check /sys/class/power_supply (less common but worth trying)
+        try:
+            for dir_name in os.listdir('/sys/class/power_supply/'):
+                dir_path = f'/sys/class/power_supply/{dir_name}'
+                if any(s in dir_name.lower() for s in [mac.replace(':', ''), name.lower().replace(' ', '_')]):
+                    capacity_path = os.path.join(dir_path, 'capacity')
+                    if os.path.exists(capacity_path):
+                        with open(capacity_path, 'r') as f:
+                            capacity = f.read().strip()
+                            if capacity.isdigit():
+                                battery_level = int(capacity)
+                                if 0 <= battery_level <= 100:
+                                    print(f"Battery found via /sys: {battery_level}% for {name}")
+                                    return battery_level
+        except (OSError, IOError) as e:
+            print(f"Could not read /sys/class/power_supply: {e}")
+
+        print(f"No reliable battery information found for {name} ({mac})")
         return None
 
     # Starts a scan for nearby Bluetooth devices for a few seconds.
