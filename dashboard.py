@@ -12,6 +12,7 @@ from adb import ADBWidget
 from bluetooth import BluetoothWidget
 from wifi import WiFiWidget
 from weather import WeatherWidget
+from mcp_chat import MCPChatWidget
 
 # This class defines the main window for the application. It holds the overall
 # structure, including the sidebar and the content area, and manages switching
@@ -109,12 +110,20 @@ class Dashboard(Adw.ApplicationWindow):
         self.weather_button.set_tooltip_text("Weather")
         self.weather_button.connect("clicked", lambda b: self.switch_view("weather"))
         
+        self.chat_button = Gtk.Button(icon_name="user-available-symbolic")
+        self.chat_button.set_size_request(60, 60)
+        self.chat_button.add_css_class("circular")
+        self.chat_button.add_css_class("sidebar-button")
+        self.chat_button.set_tooltip_text("MCP Chat")
+        self.chat_button.connect("clicked", lambda b: self.switch_view("chat"))
+        
         sidebar.append(self.media_button)
         sidebar.append(self.notifications_button)
         sidebar.append(self.adb_button)
         sidebar.append(self.bluetooth_button)
         sidebar.append(self.wifi_button)
         sidebar.append(self.weather_button)
+        sidebar.append(self.chat_button)
         
         self.content_stack = Gtk.Stack()
         self.content_stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
@@ -138,6 +147,7 @@ class Dashboard(Adw.ApplicationWindow):
             self.widgets["bluetooth"] = BluetoothWidget()
             self.widgets["wifi"] = WiFiWidget()
             self.widgets["weather"] = WeatherWidget()
+            self.widgets["chat"] = MCPChatWidget()
     
             self.content_stack.add_named(self.widgets["media"], "media")
             self.content_stack.add_named(self.widgets["notifications"], "notifications")
@@ -145,6 +155,7 @@ class Dashboard(Adw.ApplicationWindow):
             self.content_stack.add_named(self.widgets["bluetooth"], "bluetooth")
             self.content_stack.add_named(self.widgets["wifi"], "wifi")
             self.content_stack.add_named(self.widgets["weather"], "weather")
+            self.content_stack.add_named(self.widgets["chat"], "chat")
 
             self.content_stack.set_visible_child_name("media")
             self.current_widget = self.widgets["media"]
@@ -192,7 +203,8 @@ class Dashboard(Adw.ApplicationWindow):
             "adb": self.adb_button,
             "bluetooth": self.bluetooth_button,
             "wifi": self.wifi_button,
-            "weather": self.weather_button
+            "weather": self.weather_button,
+            "chat": self.chat_button
         }
         for name, button in buttons.items():
             if name == self.current_view_name:
@@ -386,6 +398,112 @@ class Dashboard(Adw.ApplicationWindow):
         .invisible-scroll { background: transparent; }
         .invisible-scroll scrollbar { min-width: 0px; opacity: 0; }
         .invisible-scroll scrollbar slider { min-width: 0px; opacity: 0; }
+        
+        /* Chat Widget Styles */
+        .chat-scroll {
+            background: transparent;
+        }
+        
+        .chat-scroll scrollbar {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 4px;
+            min-width: 8px;
+        }
+
+        .chat-scroll scrollbar slider {
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 4px;
+            min-width: 8px;
+            min-height: 20px;
+        }
+        
+        .message-box {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 12px;
+            margin: 4px 0;
+            transition: all 200ms ease;
+        }
+        
+        .message-box:hover {
+            background: rgba(255, 255, 255, 0.08);
+        }
+        
+        .message-user {
+            background: rgba(80, 160, 255, 0.15);
+            border-color: rgba(80, 160, 255, 0.3);
+            margin-left: 60px;
+        }
+        
+        .message-assistant {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(255, 255, 255, 0.1);
+            margin-right: 60px;
+        }
+        
+        .message-role {
+            font-size: 12px;
+            font-weight: bold;
+            color: rgba(255, 255, 255, 0.9);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .message-content {
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.95);
+            line-height: 1.4;
+            margin-top: 8px;
+        }
+        
+        .tool-usage {
+            background: rgba(100, 255, 100, 0.1);
+            border: 1px solid rgba(100, 255, 100, 0.3);
+            border-radius: 8px;
+            padding: 6px 12px;
+            margin: 8px 0 4px 0; /* Give it some vertical space */
+        }
+        
+        .tool-label {
+            font-size: 11px;
+            color: rgba(100, 255, 100, 0.9);
+            font-weight: 500;
+        }
+        
+        .status-message {
+            margin: 20px 0;
+        }
+        
+        .thinking-expander {
+            margin-top: 4px;
+            margin-bottom: 0;
+        }
+        
+        .thinking-expander > label {
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.7);
+            font-style: italic;
+        }
+        
+        .thinking-content {
+            background: rgba(100, 100, 100, 0.1);
+            border: 1px solid rgba(100, 100, 100, 0.2);
+            border-radius: 6px;
+            padding: 6px;
+            margin: 2px 0;
+        }
+        
+        .thinking-text {
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.6);
+            font-family: monospace;
+            line-height: 1.2;
+        }
+        
+        .error-label {
+            color: rgba(255, 100, 100, 0.9);
+        }
         .notification-icon-bg { background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 24px; }
         .notifications-list { background: transparent; }
         .notification-row { background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; margin: 4px 0px; transition: all 150ms ease; }
@@ -423,7 +541,6 @@ class Dashboard(Adw.ApplicationWindow):
             css_provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
-
 # This is the main application class that Gtk uses to manage the app's lifecycle.
 # It ensures the application has a unique ID and connects the 'activate' signal,
 # which is the primary starting point for the app.
