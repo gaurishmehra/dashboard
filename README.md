@@ -28,11 +28,11 @@ How to use
    ```
 5. (Optional) add the following lines to your hyprland config file:
    ```bash
-    windowrulev2 = float, class:^(com.gaurish.Dashboard)$
-    windowrulev2 = size 300 450, class:^(com.gaurish.Dashboard)$
-    windowrulev2 = center, class:^(com.gaurish.Dashboard)$
-    windowrulev2 = pin, class:^(com.gaurish.Dashboard)$
-    windowrulev2 = noborder, class:^(com.gaurish.Dashboard)$
+   windowrulev2 = float, class:^(one.gaurish.Dashboard)$
+   windowrulev2 = size 300 450, class:^(one.gaurish.Dashboard)$
+   windowrulev2 = center, class:^(one.gaurish.Dashboard)$
+   windowrulev2 = pin, class:^(one.gaurish.Dashboard)$
+   windowrulev2 = noborder, class:^(one.gaurish.Dashboard)$
    ```
     I recommed making it a keybind to toggle the dashboard:
     ```bash
@@ -62,7 +62,6 @@ How to use
 Current Features:
 - Dunst notification logging
 - Media controls
-- Quick access ADB
 - Wifi Controls
 - Bluetooth Controls
 - Weather Widget
@@ -83,7 +82,7 @@ The central hub of the application that manages the overall window and widget sw
 
 **Key Components:**
 - **Dashboard Class**: Main window that holds the sidebar and content area
-- **Sidebar Navigation**: Circular buttons for each widget (media, notifications, ADB, etc.)
+- **Sidebar Navigation**: Circular buttons for each widget (media, notifications, etc.)
 - **Content Stack**: GTK Stack that switches between different widget views
 - **Widget Lifecycle Management**: Only activates the currently visible widget to save resources
 - **CSS Styling**: Comprehensive theming with glassmorphism effects, animations, and responsive design
@@ -191,9 +190,6 @@ Full-featured Bluetooth device management with advanced battery monitoring.
 - Background scanning and connection management
 - Functional error handling and basic logging
 
-### `adb.py` - Android Debug Bridge Controller
-Professional ADB device management for Android developers and power users.
-
 **Device Management:**
 - **Multi-Device Support**: Handle multiple connected Android devices
 - **Device Information**: Model, Android version, battery level display
@@ -245,7 +241,6 @@ LONGITUDE=-74.0060
 - NetworkManager (for WiFi/Ethernet)
 - Bluetooth stack (bluez)
 - playerctl (for media control)
-- ADB tools (for Android debugging)
 - dunst (notification daemon)
 
 **Python Packages:**

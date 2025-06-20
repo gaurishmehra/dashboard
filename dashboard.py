@@ -3,12 +3,12 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, Gdk, GLib
 import warnings
+import os
 
 warnings.filterwarnings("ignore")
 
 from media_player import MediaPlayerWidget
 from notifications import NotificationsWidget
-from adb import ADBWidget
 from bluetooth import BluetoothWidget
 from wifi import WiFiWidget
 from weather import WeatherWidget
@@ -81,13 +81,6 @@ class Dashboard(Adw.ApplicationWindow):
         self.notifications_button.add_css_class("sidebar-button")
         self.notifications_button.set_tooltip_text("Notifications")
         self.notifications_button.connect("clicked", lambda b: self.switch_view("notifications"))
-        
-        self.adb_button = Gtk.Button(icon_name="phone-symbolic")
-        self.adb_button.set_size_request(60, 60)
-        self.adb_button.add_css_class("circular")
-        self.adb_button.add_css_class("sidebar-button")
-        self.adb_button.set_tooltip_text("ADB Controller")
-        self.adb_button.connect("clicked", lambda b: self.switch_view("adb"))
 
         self.bluetooth_button = Gtk.Button(icon_name="bluetooth-symbolic")
         self.bluetooth_button.set_size_request(60, 60)
@@ -119,7 +112,6 @@ class Dashboard(Adw.ApplicationWindow):
         
         sidebar.append(self.media_button)
         sidebar.append(self.notifications_button)
-        sidebar.append(self.adb_button)
         sidebar.append(self.bluetooth_button)
         sidebar.append(self.wifi_button)
         sidebar.append(self.weather_button)
@@ -134,7 +126,7 @@ class Dashboard(Adw.ApplicationWindow):
         
         GLib.timeout_add(50, self.create_and_activate_initial_widgets)
         
-        self.apply_enhanced_css()
+        self.load_css()
 
     # This function is called after a short delay to avoid blocking the UI thread on startup.
     # It creates instances of all the different view widgets, adds them to the content stack,
@@ -143,7 +135,6 @@ class Dashboard(Adw.ApplicationWindow):
         try:
             self.widgets["media"] = MediaPlayerWidget()
             self.widgets["notifications"] = NotificationsWidget()
-            self.widgets["adb"] = ADBWidget()
             self.widgets["bluetooth"] = BluetoothWidget()
             self.widgets["wifi"] = WiFiWidget()
             self.widgets["weather"] = WeatherWidget()
@@ -151,7 +142,6 @@ class Dashboard(Adw.ApplicationWindow):
     
             self.content_stack.add_named(self.widgets["media"], "media")
             self.content_stack.add_named(self.widgets["notifications"], "notifications")
-            self.content_stack.add_named(self.widgets["adb"], "adb")
             self.content_stack.add_named(self.widgets["bluetooth"], "bluetooth")
             self.content_stack.add_named(self.widgets["wifi"], "wifi")
             self.content_stack.add_named(self.widgets["weather"], "weather")
@@ -200,7 +190,6 @@ class Dashboard(Adw.ApplicationWindow):
         buttons = {
             "media": self.media_button,
             "notifications": self.notifications_button,
-            "adb": self.adb_button,
             "bluetooth": self.bluetooth_button,
             "wifi": self.wifi_button,
             "weather": self.weather_button,
@@ -212,335 +201,21 @@ class Dashboard(Adw.ApplicationWindow):
             else:
                 button.remove_css_class("active")
 
-    # This method loads and applies all the custom CSS styling for the application.
-    # It defines the look and feel of the window, sidebar, buttons, and all other
-    # components to create a polished and consistent user experience.
-    def apply_enhanced_css(self):
+    # This method loads the CSS from an external file for better organization
+    def load_css(self):
         css_provider = Gtk.CssProvider()
-        css_provider.load_from_data(b"""
-        window {
-            background: rgba(30, 30, 35, 0.7);
-            border-radius: 16px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
+        css_file_path = os.path.join(os.path.dirname(__file__), "style.css")
         
-        .sidebar {
-            background-image: linear-gradient(to bottom, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
-            border-radius: 12px;
-            border-right: 1px solid rgba(255, 255, 255, 0.1);
-        }
-        
-        .sidebar-button {
-            background: transparent;
-            border: 1px solid transparent;
-            color: rgba(255, 255, 255, 0.6);
-            transition: all 250ms ease-in-out;
-            border-radius: 30px;
-        }
+        try:
+            css_provider.load_from_path(css_file_path)
+            Gtk.StyleContext.add_provider_for_display(
+                self.get_display(),
+                css_provider,
+                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+            )
+        except Exception as e:
+            print(f"Error loading CSS file: {e}")
 
-        .sidebar-button:hover {
-            background: rgba(255, 255, 255, 0.1);
-            color: rgba(255, 255, 255, 0.9);
-        }
-        
-        .sidebar-button.active {
-            background: rgba(80, 160, 255, 0.25);
-            color: white;
-            border: 1px solid rgba(80, 160, 255, 0.5);
-            box-shadow: 0 0 12px rgba(80, 160, 255, 0.5);
-        }
-        
-        searchbar, entry {
-            background: rgba(0, 0, 0, 0.2);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            border-radius: 8px;
-            color: white;
-            padding: 8px 12px;
-            box-shadow: inset 0 1px 2px rgba(0,0,0,0.2);
-        }
-        
-        searchbar:focus, entry:focus {
-            border-color: rgba(80, 160, 255, 0.6);
-            box-shadow: 0 0 0 3px rgba(80, 160, 255, 0.2);
-        }
-        
-        .notification-body-scroll { background: transparent; }
-        
-        .notification-body-scroll scrollbar {
-            background: rgba(0, 0, 0, 0.2);
-            border-radius: 4px;
-            min-width: 8px;
-            opacity: 1;
-        }
-
-        .notification-body-scroll scrollbar slider {
-            background: rgba(255, 255, 255, 0.3);
-            border-radius: 4px;
-            min-width: 8px;
-            min-height: 20px;
-        }
-
-        .location-label {
-            font-size: 13px;
-            color: rgba(255, 255, 255, 0.7);
-            font-weight: 500;
-        }
-
-        .temperature-label {
-            font-size: 48px;
-            font-weight: bold;
-            color: white;
-            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
-        }
-
-        .weather-desc {
-            font-size: 16px;
-            color: rgba(255, 255, 255, 0.9);
-            font-weight: 500;
-        }
-
-        .weather-detail-label {
-            font-size: 12px;
-            color: rgba(255, 255, 255, 0.7);
-            font-weight: 500;
-        }
-
-        .weather-detail-value {
-            font-size: 12px;
-            color: rgba(255, 255, 255, 0.95);
-            font-weight: bold;
-        }
-
-        .hourly-scroll {
-            background: transparent;
-        }
-
-        .hourly-scroll scrollbar {
-            background: rgba(0, 0, 0, 0.2);
-            border-radius: 4px;
-            min-height: 8px;
-        }
-
-        .hourly-scroll scrollbar slider {
-            background: rgba(255, 255, 255, 0.3);
-            border-radius: 4px;
-            min-height: 8px;
-        }
-
-        .hourly-card {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 12px;
-            padding: 12px 8px;
-            transition: all 200ms ease;
-        }
-
-        .hourly-card:hover {
-            background: rgba(255, 255, 255, 0.08);
-            transform: scale(0.97);
-        }
-
-        .hourly-time {
-            font-size: 10px;
-            color: rgba(255, 255, 255, 0.7);
-            font-weight: 500;
-        }
-
-        .hourly-temp {
-            font-size: 13px;
-            color: white;
-            font-weight: bold;
-        }
-
-        .hourly-precip {
-            font-size: 9px;
-            color: rgba(100, 150, 255, 0.9);
-            font-weight: 500;
-        }
-
-        .daily-row {
-            background: rgba(255, 255, 255, 0.03);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 12px;
-            padding: 12px 16px;
-            transition: all 200ms ease;
-        }
-
-        .daily-row:hover {
-            background: rgba(255, 255, 255, 0.06);
-            border-color: rgba(255, 255, 255, 0.15);
-        }
-
-        .daily-day {
-            font-size: 14px;
-            color: rgba(255, 255, 255, 0.9);
-            font-weight: 500;
-        }
-
-        .daily-temp-max {
-            font-size: 14px;
-            color: white;
-            font-weight: bold;
-        }
-
-        .daily-temp-min {
-            font-size: 13px;
-            color: rgba(255, 255, 255, 0.7);
-        }
-
-        .daily-precip {
-            font-size: 11px;
-            color: rgba(100, 150, 255, 0.9);
-            font-weight: 500;
-        }
-        
-        .invisible-scroll { background: transparent; }
-        .invisible-scroll scrollbar { min-width: 0px; opacity: 0; }
-        .invisible-scroll scrollbar slider { min-width: 0px; opacity: 0; }
-        
-        /* Chat Widget Styles */
-        .chat-scroll {
-            background: transparent;
-        }
-        
-        .chat-scroll scrollbar {
-            background: rgba(0, 0, 0, 0.2);
-            border-radius: 4px;
-            min-width: 8px;
-        }
-
-        .chat-scroll scrollbar slider {
-            background: rgba(255, 255, 255, 0.3);
-            border-radius: 4px;
-            min-width: 8px;
-            min-height: 20px;
-        }
-        
-        .message-box {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 12px;
-            padding: 12px;
-            margin: 4px 0;
-            transition: all 200ms ease;
-        }
-        
-        .message-box:hover {
-            background: rgba(255, 255, 255, 0.08);
-        }
-        
-        .message-user {
-            background: rgba(80, 160, 255, 0.15);
-            border-color: rgba(80, 160, 255, 0.3);
-            margin-left: 60px;
-        }
-        
-        .message-assistant {
-            background: rgba(255, 255, 255, 0.05);
-            border-color: rgba(255, 255, 255, 0.1);
-            margin-right: 60px;
-        }
-        
-        .message-role {
-            font-size: 12px;
-            font-weight: bold;
-            color: rgba(255, 255, 255, 0.9);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        
-        .message-content {
-            font-size: 14px;
-            color: rgba(255, 255, 255, 0.95);
-            line-height: 1.4;
-            margin-top: 8px;
-        }
-        
-        .tool-usage {
-            background: rgba(100, 255, 100, 0.1);
-            border: 1px solid rgba(100, 255, 100, 0.3);
-            border-radius: 8px;
-            padding: 6px 12px;
-            margin: 8px 0 4px 0; /* Give it some vertical space */
-        }
-        
-        .tool-label {
-            font-size: 11px;
-            color: rgba(100, 255, 100, 0.9);
-            font-weight: 500;
-        }
-        
-        .status-message {
-            margin: 20px 0;
-        }
-        
-        .thinking-expander {
-            margin-top: 4px;
-            margin-bottom: 0;
-        }
-        
-        .thinking-expander > label {
-            font-size: 11px;
-            color: rgba(255, 255, 255, 0.7);
-            font-style: italic;
-        }
-        
-        .thinking-content {
-            background: rgba(100, 100, 100, 0.1);
-            border: 1px solid rgba(100, 100, 100, 0.2);
-            border-radius: 6px;
-            padding: 6px;
-            margin: 2px 0;
-        }
-        
-        .thinking-text {
-            font-size: 11px;
-            color: rgba(255, 255, 255, 0.6);
-            font-family: monospace;
-            line-height: 1.2;
-        }
-        
-        .error-label {
-            color: rgba(255, 100, 100, 0.9);
-        }
-        .notification-icon-bg { background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 24px; }
-        .notifications-list { background: transparent; }
-        .notification-row { background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; margin: 4px 0px; transition: all 150ms ease; }
-        .notification-row:hover { background: rgba(255, 255, 255, 0.07); border-color: rgba(255, 255, 255, 0.15); }
-        .notification-row.expanded { background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.2); }
-        .app-name { font-size: 11px; font-weight: bold; color: rgba(255, 255, 255, 0.9); text-transform: uppercase; letter-spacing: 0.5px; }
-        .time-label { font-size: 10px; color: rgba(255, 255, 255, 0.6); }
-        .summary-label { font-size: 13px; font-weight: 500; color: rgba(255, 255, 255, 0.95); }
-        .body-label { font-size: 12px; color: rgba(255, 255, 255, 0.8); line-height: 1.4; }
-        .expand-icon { color: rgba(255, 255, 255, 0.6); transition: transform 150ms ease; }
-        .title-large { font-size: 20px; font-weight: bold; color: white; }
-        .dim-label { color: rgba(255, 255, 255, 0.6); }
-        .title-label { font-size: 16px; font-weight: bold; color: rgba(255, 255, 255, 0.95); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); }
-        .artist-label { font-size: 13px; color: rgba(255, 255, 255, 0.8); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); }
-        .control-button { background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); color: rgba(255, 255, 255, 0.9); transition: all 100ms ease; }
-        .control-button:hover { background: rgba(255, 255, 255, 0.2); transform: scale(1.05); }
-        .play-button { background: rgba(255, 255, 255, 0.2); border: 2px solid rgba(255, 255, 255, 0.4); color: rgba(255, 255, 255, 0.95); transition: all 100ms ease; }
-        .play-button:hover { background: rgba(255, 255, 255, 0.3); transform: scale(1.05); }
-        .player-icon { background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); color: rgba(255, 255, 255, 0.7); transition: all 100ms ease; }
-        .player-icon:hover { background: rgba(255, 255, 255, 0.2); color: rgba(255, 255, 255, 0.9); transform: scale(1.05); }
-        .player-icon.suggested-action { background: rgba(80, 160, 255, 0.2); color: white; border: 1px solid rgba(80, 160, 255, 0.4); }
-        .volume-scale trough { background: rgba(0, 0, 0, 0.3); border-radius: 10px; }
-        .volume-scale highlight { background: rgba(255, 255, 255, 0.6); border-radius: 10px; }
-        .device-header { background: rgba(255, 255, 255, 0.05); border-radius: 16px; transition: all 150ms ease; padding: 12px 16px; }
-        .info-tile { background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05)); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 12px; padding: 12px; transition: all 200ms ease; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1); }
-        .info-tile:hover { transform: scale(0.97); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2); }
-        .section-title { font-size: 14px; font-weight: bold; color: rgba(255, 255, 255, 0.9); text-transform: uppercase; letter-spacing: 0.5px; }
-        .action-button { background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 12px; color: rgba(255, 255, 255, 0.9); transition: all 150ms ease; }
-        .action-button:hover { background: rgba(255, 255, 255, 0.15); border-color: rgba(255, 255, 255, 0.3); transform: scale(0.97); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); }
-
-        """)
-        
-        Gtk.StyleContext.add_provider_for_display(
-            self.get_display(),
-            css_provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
-        )
 # This is the main application class that Gtk uses to manage the app's lifecycle.
 # It ensures the application has a unique ID and connects the 'activate' signal,
 # which is the primary starting point for the app.
@@ -548,7 +223,7 @@ class DashboardApp(Adw.Application):
     # The constructor for the application class. It sets the unique application ID
     # required by Gtk and connects the 'activate' signal to the on_activate method.
     def __init__(self, **kwargs):
-        super().__init__(application_id="com.gaurish.Dashboard", **kwargs)
+        super().__init__(application_id="one.gaurish.Dashboard", **kwargs)
         self.connect('activate', self.on_activate)
     
     # This method is automatically called by Gtk when the application is launched.
