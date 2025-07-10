@@ -7,6 +7,7 @@ import os
 from datetime import datetime, timezone
 import warnings
 import subprocess
+import math
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -191,6 +192,12 @@ class NotificationsWidget(Gtk.Box):
 
         self.is_active = False
 
+        # --- Pagination State ---
+        self.current_page = 0
+        self.items_per_page = 5
+        self.total_pages = 0
+        # --- End Pagination State ---
+
         self.create_ui()
 
     # Starts the widget's operations, like loading data for the first time
@@ -237,9 +244,32 @@ class NotificationsWidget(Gtk.Box):
         self.listbox.connect("row-activated", lambda lb, row: row.toggle_expanded())
 
         scrolled_area.set_child(self.listbox)
+        
+        # --- Footer for pagination ---
+        footer_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                             margin_start=20, margin_end=20, margin_bottom=16)
+
+        self.page_info_label = Gtk.Label(label="", halign=Gtk.Align.START, xalign=0, css_classes=["dim-label"])
+        footer_box.append(self.page_info_label)
+
+        page_controls_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6,
+                                    halign=Gtk.Align.END, hexpand=True)
+        
+        self.prev_button = Gtk.Button.new_from_icon_name("go-previous-symbolic")
+        self.prev_button.connect("clicked", self.on_prev_page_clicked)
+
+        self.next_button = Gtk.Button.new_from_icon_name("go-next-symbolic")
+        self.next_button.connect("clicked", self.on_next_page_clicked)
+
+        page_controls_box.append(self.prev_button)
+        page_controls_box.append(self.next_button)
+
+        footer_box.append(page_controls_box)
+        # --- End footer ---
 
         self.append(header_box)
         self.append(scrolled_area)
+        self.append(footer_box)
 
     # Sets up a monitor that watches the notifications JSON file for changes,
     # triggering an automatic reload when the file is modified.
@@ -280,6 +310,9 @@ class NotificationsWidget(Gtk.Box):
 
             self.all_notifications.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
             self.notification_rows = [NotificationRow(n) for n in self.all_notifications]
+            
+            # Reset to first page on full reload
+            self.current_page = 0
             self.filter_notifications()
 
         except (json.JSONDecodeError, FileNotFoundError) as e:
@@ -292,29 +325,76 @@ class NotificationsWidget(Gtk.Box):
 
     # Callback function that is triggered when the text in the search entry changes.
     def on_search_changed(self, search_entry):
+        # Reset to first page when search query changes
+        self.current_page = 0
         self.filter_notifications()
 
+    def on_prev_page_clicked(self, button):
+        if self.current_page > 0:
+            self.current_page -= 1
+            self.filter_notifications()
+
+    def on_next_page_clicked(self, button):
+        if self.current_page < self.total_pages - 1:
+            self.current_page += 1
+            self.filter_notifications()
+            
     # Clears and repopulates the listbox based on the current search text,
     # showing only the notifications that match the query.
     def filter_notifications(self):
         search_text = self.search_entry.get_text().strip()
 
+        # 1. Get all rows that match the filter
+        filtered_rows = [row for row in self.notification_rows if row.matches_search(search_text)]
+        total_items = len(filtered_rows)
+
+        # 2. Clear the listbox
         for child in list(self.listbox):
              self.listbox.remove(child)
 
-        if not self.notification_rows:
-            self.show_placeholder("No notifications yet.")
+        # 3. Handle empty state
+        if total_items == 0:
+            if search_text:
+                self.show_placeholder(f"No results for '{search_text}'")
+            else:
+                 self.show_placeholder("No notifications yet.")
+            self.update_page_controls(0)
             return
 
-        filtered_count = 0
-        for row in self.notification_rows:
-            if row.matches_search(search_text):
-                self.listbox.append(row)
-                filtered_count += 1
+        # 4. Calculate page metrics
+        self.total_pages = math.ceil(total_items / self.items_per_page)
+        
+        # Clamp current page to be valid
+        self.current_page = max(0, min(self.current_page, self.total_pages - 1))
+            
+        start_index = self.current_page * self.items_per_page
+        end_index = start_index + self.items_per_page
+        
+        rows_for_current_page = filtered_rows[start_index:end_index]
 
-        if filtered_count == 0:
-            self.show_placeholder(f"No results for '{search_text}'")
+        # 5. Populate listbox with rows for the current page
+        for row in rows_for_current_page:
+            self.listbox.append(row)
 
+        # 6. Update the footer controls
+        self.update_page_controls(total_items)
+
+    def update_page_controls(self, total_items):
+        footer_box = self.page_info_label.get_parent()
+        if total_items == 0 or self.total_pages <= 1:
+            footer_box.set_visible(False)
+            return
+        
+        footer_box.set_visible(True)
+
+        page_str = f"Page {self.current_page + 1} of {self.total_pages}"
+        count_str = f"{total_items} notification{'s' if total_items != 1 else ''}"
+        
+        self.page_info_label.set_text(f"{count_str}, {page_str}")
+        
+        self.prev_button.set_sensitive(self.current_page > 0)
+        self.next_button.set_sensitive(self.current_page < self.total_pages - 1)
+        
     # Displays a placeholder message in the list area, used when there are
     # no notifications or no search results to display.
     def show_placeholder(self, text):
