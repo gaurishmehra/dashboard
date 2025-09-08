@@ -5,10 +5,12 @@ import re
 import sys
 import signal
 import logging
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple, Any
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 try:
     from PIL import Image
@@ -25,6 +27,7 @@ CONFIG = {
     'image_quality': 95,
     'debug_mode': False,
     'save_all_formats': False,
+    'capture_icon_paths': True,  # New option to enable/disable icon path capture
 }
 
 # A simple container to hold the details about an image that we get from D-Bus.
@@ -98,7 +101,7 @@ class NotificationLogger:
 
         try:
             for i, line in enumerate(lines):
-                if 'string "image-data"' in line:
+                if 'string "image-data"' in line or 'string "image_data"' in line:
                     in_image_data = True
                     for j in range(i+1, min(i+15, len(lines))):
                         metadata_line = lines[j]
@@ -147,35 +150,54 @@ class NotificationLogger:
             self.logger.error(f"Error extracting image data: {e}")
             return None, ImageMetadata()
 
-    # Raw image data from D-Bus doesn't tell you if it's RGB, BGR, etc. This function
-    # makes an educated guess by analyzing the pixel data to avoid color-swapped images.
-    def detect_color_format(self, img_array: np.ndarray, channels: int) -> str:
+    # This function extracts the image-path hint if present
+    def extract_image_path(self, lines: List[str]) -> Optional[str]:
+        in_hints = False
+        for i, line in enumerate(lines):
+            if 'array of dict entry(' in line:
+                in_hints = True
+                continue
+            if in_hints:
+                if ']' in line.strip():
+                    break
+                if 'string "image-path"' in line or 'string "image_path"' in line:
+                    # Next line should be variant string "path"
+                    for j in range(i+1, min(i+5, len(lines))):
+                        if 'variant' in lines[j] and 'string' in lines[j]:
+                            path_match = re.search(r'string\s+"(.+)"', lines[j])
+                            if path_match:
+                                path = path_match.group(1)
+                                self.logger.debug(f"Extracted image-path: {path}")
+                                return path
+        return None
+
+    # New function to check if a file path looks like an image and exists
+    def is_valid_image_path(self, path: str) -> bool:
+        if not path:
+            return False
+        
         try:
-            if channels == 4:
-                alpha_channel = img_array[:, :, 3]
-                alpha_mean = np.mean(alpha_channel)
-
-                red_var = np.var(img_array[:, :, 0])
-                blue_var = np.var(img_array[:, :, 2])
-
-                if blue_var > red_var * 1.5:
-                    return 'BGRA'
-                else:
-                    return 'RGBA'
-
-            elif channels == 3:
-                red_var = np.var(img_array[:, :, 0])
-                blue_var = np.var(img_array[:, :, 2])
-
-                if blue_var > red_var * 1.5:
-                    return 'BGR'
-                else:
-                    return 'RGB'
-
-        except Exception as e:
-            self.logger.debug(f"Color format detection failed: {e}")
-
-        return 'BGRA' if channels == 4 else 'BGR'
+            # Handle file:// URLs
+            parsed = urlparse(path)
+            if parsed.scheme == 'file':
+                local_path = parsed.path
+            elif parsed.scheme == '':
+                local_path = path
+            else:
+                return False
+            
+            # Check if file exists
+            if not os.path.exists(local_path):
+                return False
+            
+            # Check if it has an image extension
+            image_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp', '.ico', '.svg'}
+            path_obj = Path(local_path)
+            
+            return path_obj.suffix.lower() in image_extensions
+            
+        except Exception:
+            return False
 
     # This function takes the raw image bytes and metadata, converts it to a standard
     # PNG file, and saves it to our image directory.
@@ -231,43 +253,78 @@ class NotificationLogger:
             if CONFIG['save_all_formats']:
                 return self._save_all_color_formats(img_array, channels, safe_app_name, safe_timestamp)
             else:
-                return self._save_best_format(img_array, channels, safe_app_name, safe_timestamp)
+                return self._save_rgb_only(img_array, channels, safe_app_name, safe_timestamp)
 
         except Exception as e:
             self.logger.error(f"Error converting image: {e}")
             return None
 
-    # This is the primary image-saving method. It uses our color detection to hopefully
-    # save the image with the correct colors.
-    def _save_best_format(self, img_array: np.ndarray, channels: int,
-                         app_name: str, timestamp: str) -> Optional[str]:
+    # Enhanced function to save image from path with better handling
+    def save_image_from_path(self, image_path: str, app_name: str, timestamp: str, source_type: str = "path") -> Optional[str]:
         try:
-            detected_format = self.detect_color_format(img_array, channels)
-            self.logger.debug(f"Detected color format: {detected_format}")
+            parsed = urlparse(image_path)
+            if parsed.scheme == 'file':
+                local_path = parsed.path
+            elif parsed.scheme == '':
+                local_path = image_path
+            else:
+                self.logger.warning(f"Unsupported image path scheme: {parsed.scheme}")
+                return None
 
+            if not os.path.exists(local_path):
+                self.logger.warning(f"Image path does not exist: {local_path}")
+                return None
+
+            # Open and process the image
+            image = Image.open(local_path)
+
+            safe_timestamp = re.sub(r'[^\w\-_.]', '_', timestamp)
+            safe_app_name = re.sub(r'[^\w\-_.]', '_', app_name)
+            
+            # Include source type in filename to distinguish between different sources
+            original_name = Path(local_path).stem
+            filename = f"{safe_app_name}_{safe_timestamp}_{source_type}_{original_name}.png"
+            filepath = CONFIG['image_dir'] / filename
+
+            # Convert to RGB if necessary and save as PNG
+            if image.mode in ('RGBA', 'LA'):
+                image.save(filepath, 'PNG', optimize=True)
+            else:
+                # Convert to RGB for other modes
+                rgb_image = image.convert('RGB')
+                rgb_image.save(filepath, 'PNG', optimize=True)
+
+            self.logger.info(f"Saved image from {source_type}: {filepath}")
+            return str(filepath)
+
+        except Exception as e:
+            self.logger.error(f"Error saving image from {source_type}: {e}")
+            return None
+
+    # This saves the image assuming RGB/RGBA format only
+    def _save_rgb_only(self, img_array: np.ndarray, channels: int,
+                      app_name: str, timestamp: str) -> Optional[str]:
+        try:
+            # Always treat as RGB/RGBA - no color channel swapping
             if channels == 4:
-                if detected_format == 'BGRA':
-                    converted_array = img_array[:, :, [2, 1, 0, 3]]
-                else:
-                    converted_array = img_array.copy()
-                image = Image.fromarray(converted_array, 'RGBA')
-
+                image = Image.fromarray(img_array, 'RGBA')
+                format_used = 'RGBA'
             elif channels == 3:
-                if detected_format == 'BGR':
-                    converted_array = img_array[:, :, [2, 1, 0]]
-                else:
-                    converted_array = img_array.copy()
-                image = Image.fromarray(converted_array, 'RGB')
+                image = Image.fromarray(img_array, 'RGB')
+                format_used = 'RGB'
             else:
                 self.logger.error(f"Unsupported channel count: {channels}")
                 return None
 
-            filename = f"{app_name}_{timestamp}.png"
+            safe_timestamp = re.sub(r'[^\w\-_.]', '_', timestamp)
+            safe_app_name = re.sub(r'[^\w\-_.]', '_', app_name)
+
+            filename = f"{safe_app_name}_{safe_timestamp}_embedded.png"
             filepath = CONFIG['image_dir'] / filename
 
             image.save(filepath, 'PNG', optimize=True)
 
-            self.logger.info(f"Saved image ({detected_format}): {filepath}")
+            self.logger.info(f"Saved image ({format_used}): {filepath}")
             return str(filepath)
 
         except Exception as e:
@@ -297,7 +354,7 @@ class NotificationLogger:
         for format_name, array, pil_mode in formats_to_try:
             try:
                 image = Image.fromarray(array, pil_mode)
-                filename = f"{app_name}_{timestamp}_{format_name}.png"
+                filename = f"{app_name}_{timestamp}_{format_name}_embedded.png"
                 filepath = CONFIG['image_dir'] / filename
                 image.save(filepath, 'PNG', optimize=True)
                 saved_files.append(str(filepath))
@@ -396,24 +453,58 @@ class NotificationLogger:
             self.logger.debug(f"Processing strings: {strings}")
 
             notification = self.parse_notification_strings(strings)
+            
+            # Check for embedded image data
+            has_image_data = any('string "image-data"' in line or 'string "image_data"' in line for line in notification_lines)
+            
+            # Check for image-path hint
+            image_path = self.extract_image_path(notification_lines)
+            
+            # Check if the icon field contains a valid image path
+            icon_is_image_path = CONFIG['capture_icon_paths'] and self.is_valid_image_path(notification.icon)
 
-            has_image_data = any('string "image-data"' in line for line in notification_lines)
+            saved_image_paths = []
 
+            # Process embedded image data (highest priority)
             if has_image_data:
                 self.logger.info("Found embedded image data, extracting...")
                 image_data, metadata = self.extract_image_metadata_and_data(notification_lines)
 
                 if image_data and metadata.width and metadata.height:
-                    saved_image_path = self.save_image_as_png(
+                    saved_path = self.save_image_as_png(
                         image_data, metadata, notification.app_name, notification.timestamp
                     )
-                    if saved_image_path:
-                        notification.icon = saved_image_path
-                        self.logger.info(f"Successfully saved embedded image: {saved_image_path}")
-                    else:
-                        self.logger.warning("Failed to save embedded image")
+                    if saved_path:
+                        saved_image_paths.append(saved_path)
+
+            # Process image-path hint (second priority)
+            if image_path:
+                self.logger.info(f"Found image-path hint: {image_path}, saving...")
+                saved_path = self.save_image_from_path(
+                    image_path, notification.app_name, notification.timestamp, "hint"
+                )
+                if saved_path:
+                    saved_image_paths.append(saved_path)
+
+            # Process icon path if it's a valid image (third priority)
+            if icon_is_image_path:
+                self.logger.info(f"Found image in icon field: {notification.icon}, saving...")
+                saved_path = self.save_image_from_path(
+                    notification.icon, notification.app_name, notification.timestamp, "icon"
+                )
+                if saved_path:
+                    saved_image_paths.append(saved_path)
+
+            # Update notification icon with the first saved image path, or keep original if none saved
+            if saved_image_paths:
+                # Use the first saved image as the primary icon
+                notification.icon = saved_image_paths[0]
+                if len(saved_image_paths) > 1:
+                    self.logger.info(f"Multiple images saved: {', '.join(saved_image_paths)}")
                 else:
-                    self.logger.warning("Failed to extract image data or metadata")
+                    self.logger.info(f"Successfully saved image: {saved_image_paths[0]}")
+            elif has_image_data or image_path or icon_is_image_path:
+                self.logger.warning("Failed to save any images despite finding image sources")
 
             self.log_notification(notification)
 
@@ -536,7 +627,7 @@ class NotificationLogger:
 def main():
     try:
         if subprocess.run(['which', 'dbus-monitor'], capture_output=True).returncode != 0:
-            print("Error: dbus-monitor not found. Please install dbus-tools package.")
+            print("Error: dbus-monitor not found. Please install any dbus-tools package.")
             sys.exit(1)
 
         if len(sys.argv) > 1:
@@ -545,10 +636,13 @@ def main():
             elif sys.argv[1] in ['--save-all-formats', '-a']:
                 CONFIG['save_all_formats'] = True
                 CONFIG['debug_mode'] = True
+            elif sys.argv[1] in ['--no-icon-capture', '-n']:
+                CONFIG['capture_icon_paths'] = False
             elif sys.argv[1] in ['--help', '-h']:
-                print("Usage: notification_logger.py [--debug|-d] [--save-all-formats|-a] [--help|-h]")
+                print("Usage: notification_logger.py [--debug|-d] [--save-all-formats|-a] [--no-icon-capture|-n] [--help|-h]")
                 print("  --debug: Enable debug logging")
                 print("  --save-all-formats: Save images in all color formats for debugging")
+                print("  --no-icon-capture: Disable capturing images from icon paths")
                 print("  --help: Show this help message")
                 sys.exit(0)
 

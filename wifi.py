@@ -1,7 +1,7 @@
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, GLib, Pango
+from gi.repository import Gtk, Adw, GLib, Pango, Gdk
 import subprocess
 import re
 import threading
@@ -11,8 +11,44 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
+# One-time CSS injection for pink-themed switches
+_PINK_SWITCH_CSS_APPLIED = False
+def ensure_pink_switch_css():
+    global _PINK_SWITCH_CSS_APPLIED
+    if _PINK_SWITCH_CSS_APPLIED:
+        return
+    css = """
+    switch.pink-toggle {
+        background-color: rgba(255, 182, 193, 0.25);
+        border: 1px solid rgba(255, 182, 193, 0.4);
+        transition: all 150ms ease;
+    }
+    switch.pink-toggle:hover {
+        background-color: rgba(255, 182, 193, 0.35);
+        border-color: rgba(255, 182, 193, 0.5);
+    }
+    switch.pink-toggle slider {
+        background-color: rgba(255, 255, 255, 0.95);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+    }
+    switch.pink-toggle:checked {
+        background-color: rgba(255, 182, 193, 0.5);
+        border-color: rgba(255, 182, 193, 0.7);
+        box-shadow: 0 0 0 3px rgba(255, 182, 193, 0.2);
+    }
+    """
+    provider = Gtk.CssProvider()
+    provider.load_from_data(css.encode("utf-8"))
+    Gtk.StyleContext.add_provider_for_display(
+        Gdk.Display.get_default(),
+        provider,
+        Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+    )
+    _PINK_SWITCH_CSS_APPLIED = True
+
 # This class defines a custom GTK widget to display a single WiFi network.
-# It shows the network name, signal strength, and a button to connect or disconnect.
+# It shows the network name, signal strength, and buttons to connect or disconnect.
 class WiFiNetworkWidget(Gtk.Box):
     # Sets up the widget with the specific network's information.
     def __init__(self, network_info, is_connected=False):
@@ -22,7 +58,7 @@ class WiFiNetworkWidget(Gtk.Box):
         self.is_loading = False
         self.create_ui()
 
-    # Builds the visual elements of the widget, like the icon, labels, and button.
+    # Builds the visual elements of the widget, like the icon, labels, and buttons.
     def create_ui(self):
         self.add_css_class("info-tile")
         self.set_margin_top(4)
@@ -67,45 +103,45 @@ class WiFiNetworkWidget(Gtk.Box):
         self.spinner = Gtk.Spinner()
         self.spinner.set_size_request(16, 16)
         self.spinner.set_visible(False)
-        self.connect_button = Gtk.Button()
-        self.connect_button.set_size_request(90, 36)
-        self.connect_button.add_css_class("action-button")
-
-        if self.is_connected:
-            self.connect_button.set_label("Disconnect")
-            self.connect_button.add_css_class("destructive-action")
-        else:
-            self.connect_button.set_label("Connect")
-            self.connect_button.add_css_class("suggested-action")
+        self.connect_btn = Gtk.Button(label="Connect")
+        self.connect_btn.set_size_request(90, 36)
+        self.connect_btn.add_css_class("suggested-action")
+        self.disconnect_btn = Gtk.Button(label="Disconnect")
+        self.disconnect_btn.set_size_request(90, 36)
+        self.disconnect_btn.add_css_class("destructive-action")
 
         button_box.append(self.spinner)
-        button_box.append(self.connect_button)
+        button_box.append(self.connect_btn)
+        button_box.append(self.disconnect_btn)
 
         self.append(signal_icon)
         self.append(info_box)
         self.append(button_box)
 
-    # Shows or hides a loading spinner and disables the button during connection attempts.
+        self.update_buttons()
+
+    # Updates the sensitivity of the connect and disconnect buttons based on connection status and loading state.
+    def update_buttons(self):
+        self.connect_btn.set_sensitive(not self.is_connected and not self.is_loading)
+        self.disconnect_btn.set_sensitive(self.is_connected and not self.is_loading)
+
+    # Shows or hides a loading spinner and disables the buttons during connection attempts.
     def set_loading(self, loading):
         self.is_loading = loading
         self.spinner.set_visible(loading)
         if loading:
             self.spinner.start()
-            self.connect_button.set_sensitive(False)
-            self.connect_button.set_label("...")
             status_prefix = "Connecting" if not self.is_connected else "Disconnecting"
-            self.status_label.set_text(f"{status_prefix}...")
+            self.status_label.set_label(f"{status_prefix}...")
         else:
             self.spinner.stop()
-            self.connect_button.set_sensitive(True)
             signal = self.network_info.get('signal', 0)
             if self.is_connected:
-                self.connect_button.set_label("Disconnect")
-                self.status_label.set_text(f"Connected • {signal}% signal")
+                self.status_label.set_label(f"Connected • {signal}% signal")
             else:
-                self.connect_button.set_label("Connect")
                 security = self.network_info.get('security', 'Open')
-                self.status_label.set_text(f"{security} • {signal}% signal")
+                self.status_label.set_label(f"{security} • {signal}% signal")
+        self.update_buttons()
 
     # Selects the appropriate WiFi icon based on signal strength percentage.
     def get_signal_icon(self, strength):
@@ -115,7 +151,7 @@ class WiFiNetworkWidget(Gtk.Box):
         return "network-wireless-signal-weak-symbolic"
 
 # This class defines a custom GTK widget to display Ethernet connections.
-# It shows the connection name, status, and a button to connect or disconnect.
+# It shows the connection name, status, and buttons to connect or disconnect.
 class EthernetConnectionWidget(Gtk.Box):
     # Sets up the widget with the specific connection's information.
     def __init__(self, connection_info, is_connected=False):
@@ -162,43 +198,43 @@ class EthernetConnectionWidget(Gtk.Box):
         self.spinner = Gtk.Spinner()
         self.spinner.set_size_request(16, 16)
         self.spinner.set_visible(False)
-        self.connect_button = Gtk.Button()
-        self.connect_button.set_size_request(90, 36)
-        self.connect_button.add_css_class("action-button")
-
-        if self.is_connected:
-            self.connect_button.set_label("Disconnect")
-            self.connect_button.add_css_class("destructive-action")
-        else:
-            self.connect_button.set_label("Connect")
-            self.connect_button.add_css_class("suggested-action")
+        self.connect_btn = Gtk.Button(label="Connect")
+        self.connect_btn.set_size_request(90, 36)
+        self.connect_btn.add_css_class("suggested-action")
+        self.disconnect_btn = Gtk.Button(label="Disconnect")
+        self.disconnect_btn.set_size_request(90, 36)
+        self.disconnect_btn.add_css_class("destructive-action")
 
         button_box.append(self.spinner)
-        button_box.append(self.connect_button)
+        button_box.append(self.connect_btn)
+        button_box.append(self.disconnect_btn)
 
         self.append(ethernet_icon)
         self.append(info_box)
         self.append(button_box)
 
-    # Shows or hides a loading spinner and disables the button during connection attempts.
+        self.update_buttons()
+
+    # Updates the sensitivity of the connect and disconnect buttons based on connection status and loading state.
+    def update_buttons(self):
+        self.connect_btn.set_sensitive(not self.is_connected and not self.is_loading)
+        self.disconnect_btn.set_sensitive(self.is_connected and not self.is_loading)
+
+    # Shows or hides a loading spinner and disables the buttons during connection attempts.
     def set_loading(self, loading):
         self.is_loading = loading
         self.spinner.set_visible(loading)
         if loading:
             self.spinner.start()
-            self.connect_button.set_sensitive(False)
-            self.connect_button.set_label("...")
             status_prefix = "Connecting" if not self.is_connected else "Disconnecting"
-            self.status_label.set_text(f"{status_prefix}...")
+            self.status_label.set_label(f"{status_prefix}...")
         else:
             self.spinner.stop()
-            self.connect_button.set_sensitive(True)
             if self.is_connected:
-                self.connect_button.set_label("Disconnect")
-                self.status_label.set_text("Connected • Wired")
+                self.status_label.set_label("Connected • Wired")
             else:
-                self.connect_button.set_label("Connect")
-                self.status_label.set_text(f"Available • {self.connection_info.get('device', 'Unknown device')}")
+                self.status_label.set_label(f"Available • {self.connection_info.get('device', 'Unknown device')}")
+        self.update_buttons()
 
 # This class creates a dialog box that pops up to ask for a WiFi password.
 class WiFiPasswordDialog(Adw.MessageDialog):
@@ -303,25 +339,42 @@ class WiFiWidget(Gtk.Box):
 
     # Fetch all data in background threads like the weather widget
     def fetch_all_data(self):
-        def fetch_in_thread():
-            try:
-                # Fetch WiFi data
-                self.update_wifi_status_threaded()
-                self.wifi_data_loaded = True
-                
-                # Fetch Ethernet data
-                self.update_ethernet_status_threaded()
-                self.ethernet_data_loaded = True
-                
-                # Update UI on main thread
-                GLib.idle_add(self.update_ui_after_data_fetch)
-                
-            except Exception as e:
-                print(f"Error fetching network data: {e}")
-                GLib.idle_add(self.show_error, "Network Error", "Failed to fetch network information")
+        self.wifi_data_loaded = False
+        self.ethernet_data_loaded = False
+        GLib.idle_add(self.show_loading)
+        
+        thread_wifi = threading.Thread(target=self.fetch_wifi_in_thread, daemon=True)
+        thread_ethernet = threading.Thread(target=self.fetch_ethernet_in_thread, daemon=True)
+        thread_wifi.start()
+        thread_ethernet.start()
 
-        thread = threading.Thread(target=fetch_in_thread, daemon=True)
-        thread.start()
+    def fetch_wifi_in_thread(self):
+        try:
+            self.update_wifi_status_threaded()
+        except Exception as e:
+            print(f"Error fetching WiFi data: {e}")
+        finally:
+            GLib.idle_add(self.on_wifi_data_fetched)
+
+    def fetch_ethernet_in_thread(self):
+        try:
+            self.update_ethernet_status_threaded()
+        except Exception as e:
+            print(f"Error fetching Ethernet data: {e}")
+        finally:
+            GLib.idle_add(self.on_ethernet_data_fetched)
+
+    def on_wifi_data_fetched(self):
+        self.wifi_data_loaded = True
+        self.check_data_loaded()
+
+    def on_ethernet_data_fetched(self):
+        self.ethernet_data_loaded = True
+        self.check_data_loaded()
+
+    def check_data_loaded(self):
+        if self.wifi_data_loaded and self.ethernet_data_loaded:
+            self.update_ui_after_data_fetch()
 
     def update_wifi_status_threaded(self):
         """WiFi status update that runs in background thread"""
@@ -469,7 +522,11 @@ class WiFiWidget(Gtk.Box):
         self.set_margin_top(15); self.set_margin_bottom(15); self.set_margin_start(15); self.set_margin_end(15)
         header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12); header_box.set_margin_bottom(16)
         title_label = Gtk.Label(label="WiFi"); title_label.add_css_class("title-large"); title_label.set_hexpand(True); title_label.set_halign(Gtk.Align.START)
-        self.wifi_switch = Gtk.Switch(); self.wifi_switch.set_valign(Gtk.Align.CENTER); self.wifi_switch.connect("notify::active", self.on_wifi_toggled)
+        self.wifi_switch = Gtk.Switch(); self.wifi_switch.set_valign(Gtk.Align.CENTER)
+        # Apply pink theme to switch
+        ensure_pink_switch_css()
+        self.wifi_switch.add_css_class("pink-toggle")
+        self.wifi_switch.connect("notify::active", self.on_wifi_toggled)
         scan_button = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Scan for networks"); scan_button.add_css_class("circular"); scan_button.connect("clicked", lambda b: self.scan_networks())
         header_box.append(title_label); header_box.append(scan_button); header_box.append(self.wifi_switch)
         scrolled_window = Gtk.ScrolledWindow(); scrolled_window.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC); scrolled_window.set_vexpand(True); scrolled_window.add_css_class("invisible-scroll")
@@ -601,7 +658,8 @@ class WiFiWidget(Gtk.Box):
         if self.connected_network:
             self.content_box.append(Gtk.Label(label="Connected WiFi Network", xalign=0, css_classes=["section-title"]))
             widget = WiFiNetworkWidget(self.connected_network, is_connected=True)
-            widget.connect_button.connect("clicked", lambda b, n=self.connected_network: self.on_network_connect(n, connect=False))
+            widget.connect_btn.connect("clicked", lambda b, n=self.connected_network: self.on_network_connect(n, connect=True))
+            widget.disconnect_btn.connect("clicked", lambda b, n=self.connected_network: self.on_network_connect(n, connect=False))
             self.network_widgets[self.connected_network['ssid']] = widget
             self.content_box.append(widget)
 
@@ -610,7 +668,8 @@ class WiFiWidget(Gtk.Box):
             margin_top = 16 if self.connected_network else 0
             self.content_box.append(Gtk.Label(label="Connected Ethernet", xalign=0, css_classes=["section-title"], margin_top=margin_top))
             widget = EthernetConnectionWidget(self.connected_ethernet, is_connected=True)
-            widget.connect_button.connect("clicked", lambda b, n=self.connected_ethernet: self.on_ethernet_connect(n, connect=False))
+            widget.connect_btn.connect("clicked", lambda b, n=self.connected_ethernet: self.on_ethernet_connect(n, connect=True))
+            widget.disconnect_btn.connect("clicked", lambda b, n=self.connected_ethernet: self.on_ethernet_connect(n, connect=False))
             self.ethernet_widgets[self.connected_ethernet['name']] = widget
             self.content_box.append(widget)
 
@@ -620,7 +679,8 @@ class WiFiWidget(Gtk.Box):
             self.content_box.append(Gtk.Label(label="Available WiFi Networks", xalign=0, css_classes=["section-title"], margin_top=margin_top))
             for network in self.available_networks:
                 widget = WiFiNetworkWidget(network)
-                widget.connect_button.connect("clicked", lambda b, n=network: self.on_network_connect(n, connect=True))
+                widget.connect_btn.connect("clicked", lambda b, n=network: self.on_network_connect(n, connect=True))
+                widget.disconnect_btn.connect("clicked", lambda b, n=network: self.on_network_connect(n, connect=False))
                 self.network_widgets[network['ssid']] = widget
                 self.content_box.append(widget)
 
@@ -630,7 +690,8 @@ class WiFiWidget(Gtk.Box):
             self.content_box.append(Gtk.Label(label="Available Ethernet Connections", xalign=0, css_classes=["section-title"], margin_top=margin_top))
             for connection in self.available_ethernet:
                 widget = EthernetConnectionWidget(connection)
-                widget.connect_button.connect("clicked", lambda b, n=connection: self.on_ethernet_connect(n, connect=True))
+                widget.connect_btn.connect("clicked", lambda b, n=connection: self.on_ethernet_connect(n, connect=True))
+                widget.disconnect_btn.connect("clicked", lambda b, n=connection: self.on_ethernet_connect(n, connect=False))
                 self.ethernet_widgets[connection['name']] = widget
                 self.content_box.append(widget)
         

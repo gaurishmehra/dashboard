@@ -1,5 +1,5 @@
 window {
-    background: rgba(30, 30, 35, 0.7);
+    background: rgba(30, 30, 35, 0.5);
     border-radius: 16px;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
     border: 1px solid rgba(255, 255, 255, 0.1);
@@ -25,10 +25,10 @@ window {
 }
 
 .sidebar-button.active {
-    background: rgba(80, 160, 255, 0.25);
+    background: rgba(255, 182, 193, 0.15);
     color: white;
-    border: 1px solid rgba(80, 160, 255, 0.5);
-    box-shadow: 0 0 12px rgba(80, 160, 255, 0.5);
+    border: 1px solid rgba(255, 182, 193, 0.25);
+    box-shadow: 0 0 12px rgba(255, 182, 193, 0.25);
 }
 
 searchbar,
@@ -37,18 +37,51 @@ entry {
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 8px;
     color: white;
-    padding: 8px 12px;
+    padding: 2px 12px;
     box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
 searchbar:focus,
 entry:focus {
-    border-color: rgba(80, 160, 255, 0.6);
-    box-shadow: 0 0 0 3px rgba(80, 160, 255, 0.2);
+    border-color: rgba(255, 182, 193, 0.15);
+    box-shadow: 0 0 0 3px rgba(255, 182, 193, 0.2);
+}
+
+/* Styling for linked button groups (like the clipboard filter) */
+.linked > button { /* Use 'button' to apply to ToggleButton as well */
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 0;
+    color: rgba(255, 255, 255, 0.7);
+    padding: 0px 12px;
+    transition: all 150ms ease;
+    box-shadow: none; /* Reset any default button shadows */
+    border-radius: 8px;
+}
+
+.linked > button:first-child {
+    margin-right: 10px;
+}
+.linked > button:last-child {
+    margin-left: 10px;
+}
+
+.linked > button:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+}
+
+.linked > button:checked {
+    background: rgba(255, 182, 193, 0.15);
+    color: white;
+    border-color: rgba(255, 182, 193, 0.5);
 }
 
 .notification-body-scroll {
-    background: transparent;
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    margin-top: 4px;
 }
 
 .notification-body-scroll scrollbar {
@@ -64,6 +97,30 @@ entry:focus {
     min-width: 8px;
     min-height: 20px;
 }
+
+/* --- NEW: Deletion animation for clipboard items --- */
+@keyframes fade-out-and-shrink {
+    from {
+        opacity: 1;
+        max-height: 100px; /* or some large enough value */
+    }
+    to {
+        opacity: 0;
+        max-height: 0;
+        margin-top: 0;
+        margin-bottom: 0;
+        padding-top: 0;
+        padding-bottom: 0;
+        border-width: 0;
+    }
+}
+
+.notification-row.deleting {
+    animation: fade-out-and-shrink 300ms ease-out forwards;
+    overflow: hidden;
+}
+/* --- End New --- */
+
 
 .location-label {
     font-size: 13px;
@@ -122,7 +179,6 @@ entry:focus {
 
 .hourly-card:hover {
     background: rgba(255, 255, 255, 0.08);
-    transform: scale(0.97);
 }
 
 .hourly-time {
@@ -139,7 +195,7 @@ entry:focus {
 
 .hourly-precip {
     font-size: 9px;
-    color: rgba(100, 150, 255, 0.9);
+    color: rgba(255, 182, 193, 0.7);
     font-weight: 500;
 }
 
@@ -175,7 +231,7 @@ entry:focus {
 
 .daily-precip {
     font-size: 11px;
-    color: rgba(100, 150, 255, 0.9);
+    color: rgba(255, 182, 193, 0.9);
     font-weight: 500;
 }
 
@@ -193,113 +249,6 @@ entry:focus {
     opacity: 0;
 }
 
-/* Chat Widget Styles */
-.chat-scroll {
-    background: transparent;
-}
-
-.chat-scroll scrollbar {
-    background: rgba(0, 0, 0, 0.2);
-    border-radius: 4px;
-    min-width: 8px;
-}
-
-.chat-scroll scrollbar slider {
-    background: rgba(255, 255, 255, 0.3);
-    border-radius: 4px;
-    min-width: 8px;
-    min-height: 20px;
-}
-
-.message-box {
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 12px;
-    padding: 12px;
-    margin: 4px 0;
-    transition: all 200ms ease;
-}
-
-.message-box:hover {
-    background: rgba(255, 255, 255, 0.08);
-}
-
-.message-user {
-    background: rgba(80, 160, 255, 0.15);
-    border-color: rgba(80, 160, 255, 0.3);
-    margin-left: 60px;
-}
-
-.message-assistant {
-    background: rgba(255, 255, 255, 0.05);
-    border-color: rgba(255, 255, 255, 0.1);
-    margin-right: 60px;
-}
-
-.message-role {
-    font-size: 12px;
-    font-weight: bold;
-    color: rgba(255, 255, 255, 0.9);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.message-content {
-    font-size: 14px;
-    color: rgba(255, 255, 255, 0.95);
-    line-height: 1.4;
-    margin-top: 8px;
-}
-
-.tool-usage {
-    background: rgba(100, 255, 100, 0.1);
-    border: 1px solid rgba(100, 255, 100, 0.3);
-    border-radius: 8px;
-    padding: 6px 12px;
-    margin: 8px 0 4px 0;
-    /* Give it some vertical space */
-}
-
-.tool-label {
-    font-size: 11px;
-    color: rgba(100, 255, 100, 0.9);
-    font-weight: 500;
-}
-
-.status-message {
-    margin: 20px 0;
-}
-
-.thinking-expander {
-    margin-top: 4px;
-    margin-bottom: 0;
-}
-
-.thinking-expander>label {
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.7);
-    font-style: italic;
-}
-
-.thinking-content {
-    background: rgba(100, 100, 100, 0.1);
-    border: 1px solid rgba(100, 100, 100, 0.2);
-    border-radius: 6px;
-    padding: 6px;
-    margin: 2px 0;
-}
-
-.thinking-text {
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.6);
-    font-family: monospace;
-    line-height: 1.2;
-}
-
-.error-label {
-    color: rgba(255, 100, 100, 0.9);
-}
-
 .notification-icon-bg {
     background: rgba(255, 255, 255, 0.1);
     border: 1px solid rgba(255, 255, 255, 0.2);
@@ -308,23 +257,31 @@ entry:focus {
 
 .notifications-list {
     background: transparent;
+    border: none; /* Remove any default listbox border */
 }
 
-.notification-row {
-    background: rgba(255, 255, 255, 0.03);
+/* Base style for ExpanderRow and ListBoxRow */
+.notification-row, AdwExpanderRow {
+    background-color: rgba(255, 255, 255, 0.03);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 12px;
     margin: 4px 0px;
     transition: all 150ms ease;
+    box-shadow: none;
 }
 
-.notification-row:hover {
-    background: rgba(255, 255, 255, 0.07);
+.notification-row:hover, AdwExpanderRow:hover {
+    background-color: rgba(255, 255, 255, 0.07);
     border-color: rgba(255, 255, 255, 0.15);
 }
 
-.notification-row.expanded {
-    background: rgba(255, 255, 255, 0.1);
+.notification-row:selected, AdwExpanderRow:selected {
+    background-color: rgba(255, 182, 193, 0.15);
+    border-color: rgba(255, 182, 193, 0.4);
+}
+
+.notification-row.expanded, AdwExpanderRow:expanded {
+    background-color: rgba(255, 255, 255, 0.08);
     border-color: rgba(255, 255, 255, 0.2);
 }
 
@@ -348,9 +305,9 @@ entry:focus {
 }
 
 .body-label {
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.8);
-    line-height: 1.4;
+    font-size: 13px; /* Slightly larger for readability */
+    color: rgba(255, 255, 255, 0.85);
+    line-height: 1.5;
 }
 
 .expand-icon {
@@ -402,7 +359,6 @@ entry:focus {
 
 .play-button:hover {
     background: rgba(255, 255, 255, 0.3);
-    transform: scale(1.05);
 }
 
 .player-icon {
@@ -415,13 +371,12 @@ entry:focus {
 .player-icon:hover {
     background: rgba(255, 255, 255, 0.2);
     color: rgba(255, 255, 255, 0.9);
-    transform: scale(1.05);
 }
 
 .player-icon.suggested-action {
-    background: rgba(80, 160, 255, 0.2);
+    background: rgba(255, 182, 193, 0.15);
     color: white;
-    border: 1px solid rgba(80, 160, 255, 0.4);
+    border: 1px solid rgba(255, 182, 193, 0.4);
 }
 
 .volume-scale trough {
@@ -451,7 +406,7 @@ entry:focus {
 }
 
 .info-tile:hover {
-    transform: scale(0.97);
+    border: 1px solid rgba(255, 255, 255, 0.55);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
 }
 
@@ -472,8 +427,47 @@ entry:focus {
 }
 
 .action-button:hover {
-    background: rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.25);
     border-color: rgba(255, 255, 255, 0.3);
-    transform: scale(0.97);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+button.suggested-action {
+    background: rgba(100, 255, 100, 0.08);
+    border: 1px solid rgba(100, 255, 100, 0.15);
+    color: rgba(255, 255, 255, 0.9);
+    transition: all 150ms ease;
+}
+
+button.suggested-action:hover {
+    /* background: rgba(100, 255, 100, 0.1); */
+    border-color: rgba(100, 255, 100, 0.3);
+    box-shadow: 0 4px 12px rgba(100, 255, 100, 0.3);
+}
+
+button.suggested-action:disabled {
+    background: rgba(100, 255, 100, 0.04);
+    border: 1px solid rgba(100, 255, 100, 0.05);
+    color: rgba(255, 255, 255, 0.3);
+    box-shadow: none;
+}
+
+button.destructive-action {
+    background: rgba(255, 100, 100, 0.08);
+    border: 1px solid rgba(255, 100, 100, 0.15);
+    border-radius: 12px;
+    color: rgba(255, 255, 255, 0.9);
+    transition: all 150ms ease;
+}
+
+button.destructive-action:hover {
+    background: rgba(255, 100, 100, 0.1);
+    border-color: rgba(255, 100, 100, 0.3);
+    box-shadow: 0 4px 12px rgba(255, 100, 100, 0.3);
+}
+
+button.destructive-action:disabled {
+    background: rgba(255, 100, 100, 0.04);
+    border: 1px solid rgba(255, 100, 100, 0.05);
+    color: rgba(255, 255, 255, 0.3);
+    box-shadow: none;
 }

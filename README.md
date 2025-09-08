@@ -1,3 +1,5 @@
+OUTDATED AS SHIT (IG) WILL UPDATE LATER (if i remember)
+
 How to use
 ===========
 1. Clone the repository:

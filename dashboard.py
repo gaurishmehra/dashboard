@@ -1,18 +1,22 @@
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, Gdk, GLib
+from gi.repository import Gtk, Adw, Gdk, GLib, Gio
 import warnings
 import os
+import argparse
+import sys
 
 warnings.filterwarnings("ignore")
 
 from media_player import MediaPlayerWidget
 from notifications import NotificationsWidget
+# --- Import the new widget ---
+from clipboard import ClipboardWidget
+# ---
 from bluetooth import BluetoothWidget
 from wifi import WiFiWidget
 from weather import WeatherWidget
-from mcp_chat import MCPChatWidget
 
 # This class defines the main window for the application. It holds the overall
 # structure, including the sidebar and the content area, and manages switching
@@ -21,14 +25,15 @@ class Dashboard(Adw.ApplicationWindow):
     # This is the constructor for the window. It sets up initial properties
     # like the title and size, connects the escape key for closing the window,
     # and calls the method to build the user interface.
-    def __init__(self, **kwargs):
+    def __init__(self, initial_view="media", **kwargs):
         super().__init__(**kwargs)
         
         self.set_title("Media Controller")
         self.set_default_size(800, 600)
         self.set_size_request(800, 600) 
         
-        self.current_view_name = "media"
+        self.initial_view = initial_view
+        self.current_view_name = initial_view
         self.current_widget = None
         self.widgets = {}
         
@@ -51,12 +56,12 @@ class Dashboard(Adw.ApplicationWindow):
     # buttons and defers the creation of the actual content widgets to improve
     # the application's startup time.
     def create_ui(self):
-        toast_overlay = Adw.ToastOverlay()
-        self.set_content(toast_overlay)
+        self.toast_overlay = Adw.ToastOverlay()
+        self.set_content(self.toast_overlay)
         
         leaflet = Adw.Leaflet()
         leaflet.set_can_navigate_back(True)
-        toast_overlay.set_child(leaflet)
+        self.toast_overlay.set_child(leaflet)
         
         sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         sidebar.set_size_request(90, -1)
@@ -82,6 +87,15 @@ class Dashboard(Adw.ApplicationWindow):
         self.notifications_button.set_tooltip_text("Notifications")
         self.notifications_button.connect("clicked", lambda b: self.switch_view("notifications"))
 
+        # --- Create the clipboard button ---
+        self.clipboard_button = Gtk.Button(icon_name="edit-paste-symbolic")
+        self.clipboard_button.set_size_request(60, 60)
+        self.clipboard_button.add_css_class("circular")
+        self.clipboard_button.add_css_class("sidebar-button")
+        self.clipboard_button.set_tooltip_text("Clipboard History")
+        self.clipboard_button.connect("clicked", lambda b: self.switch_view("clipboard"))
+        # ---
+
         self.bluetooth_button = Gtk.Button(icon_name="bluetooth-symbolic")
         self.bluetooth_button.set_size_request(60, 60)
         self.bluetooth_button.add_css_class("circular")
@@ -103,19 +117,14 @@ class Dashboard(Adw.ApplicationWindow):
         self.weather_button.set_tooltip_text("Weather")
         self.weather_button.connect("clicked", lambda b: self.switch_view("weather"))
         
-        self.chat_button = Gtk.Button(icon_name="user-available-symbolic")
-        self.chat_button.set_size_request(60, 60)
-        self.chat_button.add_css_class("circular")
-        self.chat_button.add_css_class("sidebar-button")
-        self.chat_button.set_tooltip_text("MCP Chat")
-        self.chat_button.connect("clicked", lambda b: self.switch_view("chat"))
-        
+        # --- Add buttons to sidebar in the correct order ---
         sidebar.append(self.media_button)
         sidebar.append(self.notifications_button)
+        sidebar.append(self.clipboard_button) # Added here
         sidebar.append(self.bluetooth_button)
         sidebar.append(self.wifi_button)
         sidebar.append(self.weather_button)
-        sidebar.append(self.chat_button)
+        # ---
         
         self.content_stack = Gtk.Stack()
         self.content_stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
@@ -135,20 +144,25 @@ class Dashboard(Adw.ApplicationWindow):
         try:
             self.widgets["media"] = MediaPlayerWidget()
             self.widgets["notifications"] = NotificationsWidget()
+            # --- Instantiate the new widget, passing the toast overlay ---
+            self.widgets["clipboard"] = ClipboardWidget(toast_overlay=self.toast_overlay)
+            # ---
             self.widgets["bluetooth"] = BluetoothWidget()
             self.widgets["wifi"] = WiFiWidget()
             self.widgets["weather"] = WeatherWidget()
-            self.widgets["chat"] = MCPChatWidget()
     
             self.content_stack.add_named(self.widgets["media"], "media")
             self.content_stack.add_named(self.widgets["notifications"], "notifications")
+            # --- Add the new widget to the stack ---
+            self.content_stack.add_named(self.widgets["clipboard"], "clipboard")
+            # ---
             self.content_stack.add_named(self.widgets["bluetooth"], "bluetooth")
             self.content_stack.add_named(self.widgets["wifi"], "wifi")
             self.content_stack.add_named(self.widgets["weather"], "weather")
-            self.content_stack.add_named(self.widgets["chat"], "chat")
 
-            self.content_stack.set_visible_child_name("media")
-            self.current_widget = self.widgets["media"]
+            # Use the initial view instead of hardcoded "media"
+            self.content_stack.set_visible_child_name(self.initial_view)
+            self.current_widget = self.widgets[self.initial_view]
 
             if hasattr(self.current_widget, 'activate'):
                 self.current_widget.activate() 
@@ -190,10 +204,12 @@ class Dashboard(Adw.ApplicationWindow):
         buttons = {
             "media": self.media_button,
             "notifications": self.notifications_button,
+            # --- Add the new button to the map ---
+            "clipboard": self.clipboard_button,
+            # ---
             "bluetooth": self.bluetooth_button,
             "wifi": self.wifi_button,
-            "weather": self.weather_button,
-            "chat": self.chat_button
+            "weather": self.weather_button
         }
         for name, button in buttons.items():
             if name == self.current_view_name:
@@ -222,26 +238,56 @@ class Dashboard(Adw.ApplicationWindow):
 class DashboardApp(Adw.Application):
     # The constructor for the application class. It sets the unique application ID
     # required by Gtk and connects the 'activate' signal to the on_activate method.
-    def __init__(self, **kwargs):
+    def __init__(self, initial_view="media", **kwargs):
         super().__init__(application_id="one.gaurish.Dashboard", **kwargs)
+        self.initial_view = initial_view
         self.connect('activate', self.on_activate)
+        
+        # Add command line option handling
+        self.add_main_option("view", ord("v"), 0,
+                            GLib.OptionArg.STRING, "Open specific view", "VIEW")
+    
+    # Handle command line options
+    def do_handle_local_options(self, options):
+        if options.contains("view"):
+            view = options.lookup_value("view").get_string()
+            valid_views = ["media", "notifications", "clipboard", "bluetooth", "wifi", "weather"]
+            
+            if view in valid_views:
+                self.initial_view = view
+            else:
+                print(f"Invalid view '{view}'. Valid options: {', '.join(valid_views)}")
+                return 1
+        
+        return -1  # Continue processing
     
     # This method is automatically called by Gtk when the application is launched.
     # Its main job is to create an instance of our main Dashboard window and show it
     # to the user.
     def on_activate(self, app):
         try:
-            self.win = Dashboard(application=app)
+            self.win = Dashboard(application=app, initial_view=self.initial_view)
             self.win.present()
         except Exception as e:
             print(f"Error creating dashboard: {e}")
+
+# Parse command line arguments and validate view option
+def parse_args():
+    parser = argparse.ArgumentParser(description='Media Controller Dashboard')
+    parser.add_argument('--view', '-v', 
+                       choices=['media', 'notifications', 'clipboard', 'bluetooth', 'wifi', 'weather'],
+                       default='media',
+                       help='Open specific view on startup (default: media)')
+    
+    return parser.parse_args()
 
 # This is the main entry point function for the script. It creates an
 # instance of our DashboardApp and tells it to run, starting the Gtk event loop.
 def main():
     try:
-        app = DashboardApp()
-        return app.run()
+        args = parse_args()
+        app = DashboardApp(initial_view=args.view)
+        return app.run(sys.argv)
     except Exception as e:
         print(f"Error starting app: {e}")
         return 1

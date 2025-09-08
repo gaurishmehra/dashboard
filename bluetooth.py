@@ -1,7 +1,7 @@
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, GLib, Pango
+from gi.repository import Gtk, Adw, GLib, Pango, Gdk
 import subprocess
 import json
 import re
@@ -12,8 +12,44 @@ import os
 
 warnings.filterwarnings("ignore")
 
+# One-time CSS injection for pink-themed switches
+_PINK_SWITCH_CSS_APPLIED = False
+def ensure_pink_switch_css():
+    global _PINK_SWITCH_CSS_APPLIED
+    if _PINK_SWITCH_CSS_APPLIED:
+        return
+    css = """
+    switch.pink-toggle {
+        background-color: rgba(255, 182, 193, 0.25);
+        border: 1px solid rgba(255, 182, 193, 0.4);
+        transition: all 150ms ease;
+    }
+    switch.pink-toggle:hover {
+        background-color: rgba(255, 182, 193, 0.35);
+        border-color: rgba(255, 182, 193, 0.5);
+    }
+    switch.pink-toggle slider {
+        background-color: rgba(255, 255, 255, 0.95);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+    }
+    switch.pink-toggle:checked {
+        background-color: rgba(255, 182, 193, 0.5);
+        border-color: rgba(255, 182, 193, 0.7);
+        box-shadow: 0 0 0 3px rgba(255, 182, 193, 0.2);
+    }
+    """
+    provider = Gtk.CssProvider()
+    provider.load_from_data(css.encode("utf-8"))
+    Gtk.StyleContext.add_provider_for_display(
+        Gdk.Display.get_default(),
+        provider,
+        Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+    )
+    _PINK_SWITCH_CSS_APPLIED = True
+
 # This class represents a single row for a Bluetooth device in the UI.
-# It displays the device's icon, name, status, and a button to connect or disconnect.
+# It displays the device's icon, name, status, and buttons to connect or disconnect.
 class BluetoothDeviceWidget(Gtk.Box):
     # Sets up the widget with the device's info and connection status.
     def __init__(self, device_info, is_connected=False):
@@ -62,68 +98,60 @@ class BluetoothDeviceWidget(Gtk.Box):
         self.spinner.set_size_request(16, 16)
         self.spinner.set_visible(False)
 
-        self.connect_button = Gtk.Button()
-        self.connect_button.set_size_request(80, 36)
-        self.connect_button.add_css_class("action-button")
-
-        if self.is_connected:
-            self.connect_button.set_label("Disconnect")
-            self.connect_button.add_css_class("destructive-action")
-        else:
-            self.connect_button.set_label("Connect")
-            self.connect_button.add_css_class("suggested-action")
+        self.connect_btn = Gtk.Button(label="Connect")
+        self.connect_btn.set_size_request(90, 36)
+        self.connect_btn.add_css_class("suggested-action")
+        self.disconnect_btn = Gtk.Button(label="Disconnect")
+        self.disconnect_btn.set_size_request(90, 36)
+        self.disconnect_btn.add_css_class("destructive-action")
 
         button_box.append(self.spinner)
-        button_box.append(self.connect_button)
+        button_box.append(self.connect_btn)
+        button_box.append(self.disconnect_btn)
 
         self.append(device_icon)
         self.append(info_box)
         self.append(button_box)
 
+        self.update_buttons()
+
+    # Updates the sensitivity of the connect and disconnect buttons based on connection status and loading state.
+    def update_buttons(self):
+        self.connect_btn.set_sensitive(not self.is_connected and not self.is_loading)
+        self.disconnect_btn.set_sensitive(self.is_connected and not self.is_loading)
+
     # Shows or hides the loading spinner while a connection is in progress.
     def set_loading(self, loading):
         self.is_loading = loading
+        self.spinner.set_visible(loading)
         if loading:
-            self.spinner.set_visible(True)
             self.spinner.start()
-            self.connect_button.set_sensitive(False)
-            self.connect_button.set_label("...")
-            self.status_label.set_text("Connecting..." if not self.is_connected else "Disconnecting...")
+            self.status_label.set_label("Connecting..." if not self.is_connected else "Disconnecting...")
         else:
-            self.spinner.set_visible(False)
             self.spinner.stop()
-            self.connect_button.set_sensitive(True)
-
             if self.is_connected:
-                self.connect_button.set_label("Disconnect")
                 battery_level = self.device_info.get('battery', None)
                 if battery_level is not None:
-                    self.status_label.set_text(f"Connected • {battery_level}% battery")
+                    self.status_label.set_label(f"Connected • {battery_level}% battery")
                 else:
-                    self.status_label.set_text("Connected")
+                    self.status_label.set_label("Connected")
             else:
-                self.connect_button.set_label("Connect")
-                self.status_label.set_text("Available")
+                self.status_label.set_label("Available")
+        self.update_buttons()
 
     # Updates the widget's appearance based on its new connection state.
     def update_connection_state(self, connected):
         self.is_connected = connected
-
-        self.connect_button.remove_css_class("destructive-action")
-        self.connect_button.remove_css_class("suggested-action")
+        self.update_buttons()
 
         if connected:
-            self.connect_button.set_label("Disconnect")
-            self.connect_button.add_css_class("destructive-action")
             battery_level = self.device_info.get('battery', None)
             if battery_level is not None:
-                self.status_label.set_text(f"Connected • {battery_level}% battery")
+                self.status_label.set_label(f"Connected • {battery_level}% battery")
             else:
-                self.status_label.set_text("Connected")
+                self.status_label.set_label("Connected")
         else:
-            self.connect_button.set_label("Connect")
-            self.connect_button.add_css_class("suggested-action")
-            self.status_label.set_text("Available")
+            self.status_label.set_label("Available")
 
     # Chooses a suitable icon based on the device's type or name.
     def get_device_icon(self):
@@ -226,6 +254,9 @@ class BluetoothWidget(Gtk.Box):
 
         self.bluetooth_switch = Gtk.Switch()
         self.bluetooth_switch.set_valign(Gtk.Align.CENTER)
+        # Apply pink theme to switch
+        ensure_pink_switch_css()
+        self.bluetooth_switch.add_css_class("pink-toggle")
         self.bluetooth_switch.connect("notify::active", self.on_bluetooth_toggled)
 
         scan_button = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Scan for devices")
@@ -480,8 +511,8 @@ class BluetoothWidget(Gtk.Box):
 
             for device in self.connected_devices:
                 device_widget = BluetoothDeviceWidget(device, is_connected=True)
-                device_widget.connect_button.connect("clicked",
-                    lambda b, d=device: self.on_device_connect(d, connect=False))
+                device_widget.connect_btn.connect("clicked", lambda b, d=device: self.on_device_connect(d, connect=True))
+                device_widget.disconnect_btn.connect("clicked", lambda b, d=device: self.on_device_connect(d, connect=False))
                 self.device_widgets[device['mac']] = device_widget
                 self.content_box.append(device_widget)
 
@@ -500,8 +531,8 @@ class BluetoothWidget(Gtk.Box):
 
             for device in self.available_devices:
                 device_widget = BluetoothDeviceWidget(device, is_connected=False)
-                device_widget.connect_button.connect("clicked",
-                    lambda b, d=device: self.on_device_connect(d, connect=True))
+                device_widget.connect_btn.connect("clicked", lambda b, d=device: self.on_device_connect(d, connect=True))
+                device_widget.disconnect_btn.connect("clicked", lambda b, d=device: self.on_device_connect(d, connect=False))
                 self.device_widgets[device['mac']] = device_widget
                 self.content_box.append(device_widget)
 
