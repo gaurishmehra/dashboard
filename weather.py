@@ -2,15 +2,28 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib, Pango, Gdk
-import requests
 import json
 import os
+import threading
 from datetime import datetime, timedelta
 import warnings
+import traceback
+
+# Lazy import for requests - deferred to first use to speed up module load
+_requests = None
+def _get_requests():
+    global _requests
+    if _requests is None:
+        import requests
+        _requests = requests
+    return _requests
 
 warnings.filterwarnings("ignore")
 
 class WeatherWidget(Gtk.Box):
+    # Cache file path for persistent storage
+    CACHE_FILE = os.path.join(os.path.dirname(os.path.realpath(__file__)), '.weather_cache.json')
+    
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         
@@ -20,9 +33,46 @@ class WeatherWidget(Gtk.Box):
         self.air_quality_data = {}
         self.is_active = False
         self.update_timeout_id = None
+        self._has_cached_data = False
+        self._is_loading = False
         
         self.load_config()
+        self.load_cache_from_file()  # Load cache on startup
         self.create_ui()
+    
+    def load_cache_from_file(self):
+        """Load cached weather data from file"""
+        try:
+            if os.path.exists(self.CACHE_FILE):
+                with open(self.CACHE_FILE, 'r') as f:
+                    cache_data = json.load(f)
+                
+                self.weather_data = cache_data.get('weather_data', {})
+                self.forecast_data = cache_data.get('forecast_data', {})
+                self.location_data = cache_data.get('location_data', {})
+                self.air_quality_data = cache_data.get('air_quality_data', {})
+                
+                if self.weather_data:
+                    self._has_cached_data = True
+                    print("Weather cache loaded from file")
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"Error loading weather cache: {e}")
+            self._has_cached_data = False
+    
+    def save_cache_to_file(self):
+        """Save current weather data to cache file"""
+        try:
+            cache_data = {
+                'weather_data': self.weather_data,
+                'forecast_data': self.forecast_data,
+                'location_data': self.location_data,
+                'air_quality_data': self.air_quality_data
+            }
+            with open(self.CACHE_FILE, 'w') as f:
+                json.dump(cache_data, f, indent=2)
+            print("Weather cache saved to file")
+        except IOError as e:
+            print(f"Error saving weather cache: {e}")
     
     def load_config(self):
         # Using realpath is more robust, especially if running via symlinks
@@ -46,8 +96,20 @@ class WeatherWidget(Gtk.Box):
             return
         self.is_active = True
         print("WeatherWidget Activated")
-        self.fetch_weather_data()
-        self.update_timeout_id = GLib.timeout_add_seconds(600, self.fetch_weather_data)
+        
+        # If we have cached data, show it immediately
+        if self._has_cached_data:
+            # Show cached data first, then fetch updates silently
+            city_name = self.location_data.get('city', 'Unknown Location')
+            self.location_label.set_text(city_name)
+            self.create_weather_ui()
+            # Fetch fresh data in background without spinner
+            self.fetch_weather_data(show_spinner=False)
+        else:
+            # First time load - show spinner
+            self.fetch_weather_data(show_spinner=True)
+        
+        self.update_timeout_id = GLib.timeout_add_seconds(900, lambda: self.fetch_weather_data(show_spinner=False) or True)
     
     def deactivate(self):
         if not self.is_active:
@@ -57,6 +119,19 @@ class WeatherWidget(Gtk.Box):
         if self.update_timeout_id:
             GLib.source_remove(self.update_timeout_id)
             self.update_timeout_id = None
+    
+    def on_refresh_clicked(self, button):
+        """Handle refresh button click - show spinning animation"""
+        self.fetch_weather_data(show_spinner=False)
+    
+    def set_refresh_button_loading(self, loading):
+        """Set refresh button to spinning/loading state"""
+        if loading:
+            self.refresh_button.add_css_class("refresh-spinning")
+            self.refresh_button.set_sensitive(False)
+        else:
+            self.refresh_button.remove_css_class("refresh-spinning")
+            self.refresh_button.set_sensitive(True)
     
     def create_ui(self):
         header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12,
@@ -69,11 +144,11 @@ class WeatherWidget(Gtk.Box):
         title_box.append(self.location_label)
         header_box.append(title_box)
         
-        refresh_button = Gtk.Button(icon_name="view-refresh-symbolic", 
+        self.refresh_button = Gtk.Button(icon_name="view-refresh-symbolic", 
                                    tooltip_text="Refresh Weather", 
                                    css_classes=["circular"])
-        refresh_button.connect("clicked", lambda b: self.fetch_weather_data())
-        header_box.append(refresh_button)
+        self.refresh_button.connect("clicked", self.on_refresh_clicked)
+        header_box.append(self.refresh_button)
         
         self.append(header_box)
         
@@ -86,8 +161,13 @@ class WeatherWidget(Gtk.Box):
         self.content_scrolled.set_child(self.content_box)
         self.append(self.content_scrolled)
         
-        # Display loading spinner initially
-        self.show_loading()
+        # Display cached data if available, otherwise show loading spinner
+        if self._has_cached_data:
+            city_name = self.location_data.get('city', 'Unknown Location')
+            self.location_label.set_text(city_name)
+            self.create_weather_ui()
+        else:
+            self.show_loading()
     
     def create_weather_ui(self):
         try:
@@ -526,12 +606,23 @@ class WeatherWidget(Gtk.Box):
         day_row.append(temp_box)
         return day_row
     
-    def fetch_weather_data(self):
+    def fetch_weather_data(self, show_spinner=True):
         if not self.latitude or not self.longitude:
             GLib.idle_add(self.create_weather_ui)
             return GLib.SOURCE_REMOVE
         
-        GLib.idle_add(self.show_loading)
+        # Prevent multiple simultaneous fetches
+        if self._is_loading:
+            return GLib.SOURCE_CONTINUE
+        
+        self._is_loading = True
+        
+        # Show spinning refresh button
+        GLib.idle_add(self.set_refresh_button_loading, True)
+        
+        # Only show loading spinner if no cached data
+        if show_spinner and not self._has_cached_data:
+            GLib.idle_add(self.show_loading)
 
         def fetch_in_thread():
             try:
@@ -552,6 +643,9 @@ class WeatherWidget(Gtk.Box):
                     f"&timezone=auto&forecast_days=7"
                 )
 
+                # Get requests module (lazy loaded)
+                requests = _get_requests()
+                
                 weather_response = requests.get(weather_url, timeout=10)
                 weather_response.raise_for_status()
                 
@@ -594,21 +688,36 @@ class WeatherWidget(Gtk.Box):
                     city_name = timezone.split('/')[-1].replace('_', ' ') if '/' in timezone else 'Unknown Location'
                     self.location_data = {'city': city_name}
                 
+                # Mark as having cached data and save to file
+                self._has_cached_data = True
+                self._is_loading = False
+                self.save_cache_to_file()
+                
+                GLib.idle_add(self.set_refresh_button_loading, False)
                 GLib.idle_add(self.update_location_and_weather)
             
             except requests.exceptions.HTTPError as e:
                 print(f"API Error fetching weather data: {e}")
-                GLib.idle_add(self.show_error, "API Error", "The weather service returned an error.")
+                self._is_loading = False
+                GLib.idle_add(self.set_refresh_button_loading, False)
+                # Only show error if no cached data to fall back on
+                if not self._has_cached_data:
+                    GLib.idle_add(self.show_error, "API Error", "The weather service returned an error.")
             except requests.exceptions.RequestException as e:
                 print(f"Network Error fetching weather data: {e}")
-                GLib.idle_add(self.show_error, "Network Error", "Failed to connect to weather service.")
+                self._is_loading = False
+                GLib.idle_add(self.set_refresh_button_loading, False)
+                # Only show error if no cached data to fall back on
+                if not self._has_cached_data:
+                    GLib.idle_add(self.show_error, "Network Error", "Failed to connect to weather service.")
             except Exception as e:
                 print(f"An unexpected error occurred: {e}")
-                import traceback
                 traceback.print_exc()
-                GLib.idle_add(self.show_error, "Application Error", "An unexpected error occurred.")
+                self._is_loading = False
+                GLib.idle_add(self.set_refresh_button_loading, False)
+                if not self._has_cached_data:
+                    GLib.idle_add(self.show_error, "Application Error", "An unexpected error occurred.")
 
-        import threading
         thread = threading.Thread(target=fetch_in_thread, daemon=True)
         thread.start()
         return GLib.SOURCE_CONTINUE

@@ -131,7 +131,7 @@ class NotificationRow(Gtk.ListBoxRow):
         # Create revealer for smooth animation
         self.body_revealer = Gtk.Revealer(
             transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN,
-            transition_duration=300,
+            transition_duration=150,
             reveal_child=False
         )
         self.main_box.append(self.body_revealer)
@@ -319,7 +319,7 @@ class NotificationRow(Gtk.ListBoxRow):
         if hasattr(self, 'image_spinner'):
             self.image_spinner.start()
         
-        thread = threading.Thread(target=self.load_image_worker)
+        thread = threading.Thread(target=self.load_image_worker, daemon=True)
         thread.start()
 
     def load_image_worker(self):
@@ -509,7 +509,7 @@ class NotificationsWidget(Gtk.Box):
 
         # Pagination state
         self.current_page = 0
-        self.items_per_page = 5
+        self.items_per_page = 10
         self.total_pages = 0
         self.search_timeout_id = 0
 
@@ -714,7 +714,7 @@ class NotificationsWidget(Gtk.Box):
 
             file = Gio.File.new_for_path(self.notifications_file)
             self.file_monitor = file.monitor_file(Gio.FileMonitorFlags.NONE, None)
-            self.file_monitor.connect("changed", lambda *args: GLib.timeout_add(250, self.reload_notifications))
+            self.file_monitor.connect("changed", lambda *args: GLib.timeout_add(500, self.reload_notifications))
             print("File monitor started for notifications.")
         except Exception as e:
             print(f"Failed to set up file monitor: {e}")

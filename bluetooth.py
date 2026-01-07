@@ -173,7 +173,7 @@ class BluetoothDeviceWidget(Gtk.Box):
         else:
             return "bluetooth-symbolic"
 
-# This is the main widget for the Bluetooth panel. It manages the global
+# This class is the main widget for the Bluetooth panel. It manages the global
 # Bluetooth state, discovers devices, and displays them in lists.
 class BluetoothWidget(Gtk.Box):
     # Initializes the main widget, sets up device lists, and starts a
@@ -185,6 +185,8 @@ class BluetoothWidget(Gtk.Box):
         self.available_devices = []
         self.bluetooth_enabled = False
         self.device_widgets = {}
+        self._battery_cache = {}  # Cache battery levels
+        self._battery_cache_timeout = 120  # Seconds before re-checking battery
 
         self.command_queue = queue.Queue()
         self.command_thread = threading.Thread(target=self.command_worker, daemon=True)
@@ -205,8 +207,8 @@ class BluetoothWidget(Gtk.Box):
         print("BluetoothWidget Activated")
         self.update_bluetooth_status()
         if self.update_timer_id is None:
-            self.update_timer_id = GLib.timeout_add_seconds(3, self.update_bluetooth_status)
-            self.scan_timer_id = GLib.timeout_add_seconds(10, self.scan_devices)
+            self.update_timer_id = GLib.timeout_add_seconds(5, self.update_bluetooth_status)
+            self.scan_timer_id = GLib.timeout_add_seconds(30, self.scan_devices)
 
     # This is called when the widget is hidden. It stops the periodic
     # checks and scanning to save system resources.
@@ -229,7 +231,12 @@ class BluetoothWidget(Gtk.Box):
             try:
                 command = self.command_queue.get(timeout=1)
                 if command:
-                    subprocess.run(command, shell=True, capture_output=True, text=True, timeout=10)
+                    # Convert string command to list for better performance
+                    if isinstance(command, str):
+                        cmd_list = command.split()
+                    else:
+                        cmd_list = command
+                    subprocess.run(cmd_list, capture_output=True, text=True, timeout=10)
                 self.command_queue.task_done()
             except queue.Empty:
                 continue
@@ -259,12 +266,12 @@ class BluetoothWidget(Gtk.Box):
         self.bluetooth_switch.add_css_class("pink-toggle")
         self.bluetooth_switch.connect("notify::active", self.on_bluetooth_toggled)
 
-        scan_button = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Scan for devices")
-        scan_button.add_css_class("circular")
-        scan_button.connect("clicked", lambda b: self.scan_devices())
+        self.scan_button = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Scan for devices")
+        self.scan_button.add_css_class("circular")
+        self.scan_button.connect("clicked", lambda b: self.scan_devices())
 
         header_box.append(title_label)
-        header_box.append(scan_button)
+        header_box.append(self.scan_button)
         header_box.append(self.bluetooth_switch)
 
         scrolled_window = Gtk.ScrolledWindow()
@@ -278,13 +285,17 @@ class BluetoothWidget(Gtk.Box):
         self.append(header_box)
         self.append(scrolled_window)
 
-    # A utility function to execute a shell command and return its output.
+    # A utility function to execute a command and return its output.
     def run_bluetooth_command(self, command):
         try:
-            result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=5)
+            # Convert string command to list for better performance (no shell overhead)
+            if isinstance(command, str):
+                cmd_list = command.split()
+            else:
+                cmd_list = command
+            result = subprocess.run(cmd_list, capture_output=True, text=True, timeout=3)
             return result.stdout.strip() if result.returncode == 0 else ""
         except Exception as e:
-            print(f"Bluetooth command error: {e}")
             return ""
 
     # Checks if Bluetooth is currently powered on and updates the device list accordingly.
@@ -382,20 +393,31 @@ class BluetoothWidget(Gtk.Box):
         return "unknown"
 
     # This function attempts to find the battery level of a device, correctly parsing
-    # both decimal and hexadecimal values from the system.
+    # both decimal and hexadecimal values from the system. Uses caching to reduce overhead.
     def get_battery_level(self, mac, name):
+        import time
+        cache_key = mac
+        now = time.time()
+        
+        # Check cache first
+        if cache_key in self._battery_cache:
+            cached_value, cached_time = self._battery_cache[cache_key]
+            if now - cached_time < self._battery_cache_timeout:
+                return cached_value
+        
         print(f"Getting battery level for {name} ({mac})")
         mac_formatted = mac.replace(':', '_')
 
         # Method 1: Try D-Bus directly using gdbus (most reliable)
         try:
-            cmd = (
-                f"gdbus call --system --dest org.bluez "
-                f"--object-path /org/bluez/hci0/dev_{mac_formatted} "
-                f"--method org.freedesktop.DBus.Properties.Get "
-                f"org.bluez.Battery1 Percentage"
-            )
-            dbus_output = self.run_bluetooth_command(f"{cmd} 2>/dev/null")
+            cmd_list = [
+                "gdbus", "call", "--system", "--dest", "org.bluez",
+                "--object-path", f"/org/bluez/hci0/dev_{mac_formatted}",
+                "--method", "org.freedesktop.DBus.Properties.Get",
+                "org.bluez.Battery1", "Percentage"
+            ]
+            result = subprocess.run(cmd_list, capture_output=True, text=True, timeout=3)
+            dbus_output = result.stdout.strip() if result.returncode == 0 else ""
 
             if dbus_output:
                 print(f"D-Bus output for {name}: {dbus_output}")
@@ -407,13 +429,14 @@ class BluetoothWidget(Gtk.Box):
                     battery_level = int(value_str, 0)
                     if 0 <= battery_level <= 100:
                         print(f"Battery found via D-Bus: {battery_level}% for {name} (parsed from '{value_str}')")
+                        self._battery_cache[cache_key] = (battery_level, now)
                         return battery_level
         except Exception as e:
             print(f"Error querying D-Bus for battery: {e}")
 
         # Method 2: Try bluetoothctl info (good fallback, also handles hex/dec)
         try:
-            info_output = self.run_bluetooth_command(f"bluetoothctl info {mac}")
+            info_output = self.run_bluetooth_command(["bluetoothctl", "info", mac])
             if info_output:
                 # First, try to find the simple decimal value in parentheses, e.g. (74)
                 match = re.search(r'Battery Percentage:.*?\((d+)\)', info_output)
@@ -421,6 +444,7 @@ class BluetoothWidget(Gtk.Box):
                     battery_level = int(match.group(1))
                     if 0 <= battery_level <= 100:
                         print(f"Battery found via bluetoothctl (decimal): {battery_level}% for {name}")
+                        self._battery_cache[cache_key] = (battery_level, now)
                         return battery_level
 
                 # If not found, try to parse the main value which could be hex or dec
@@ -430,6 +454,7 @@ class BluetoothWidget(Gtk.Box):
                     battery_level = int(value_str, 0)
                     if 0 <= battery_level <= 100:
                         print(f"Battery found via bluetoothctl (hex/dec): {battery_level}% for {name} (parsed from '{value_str}')")
+                        self._battery_cache[cache_key] = (battery_level, now)
                         return battery_level
         except Exception as e:
             print(f"Error querying bluetoothctl for battery: {e}")
@@ -447,20 +472,41 @@ class BluetoothWidget(Gtk.Box):
                                 battery_level = int(capacity)
                                 if 0 <= battery_level <= 100:
                                     print(f"Battery found via /sys: {battery_level}% for {name}")
+                                    self._battery_cache[cache_key] = (battery_level, now)
                                     return battery_level
         except (OSError, IOError) as e:
             print(f"Could not read /sys/class/power_supply: {e}")
 
         print(f"No reliable battery information found for {name} ({mac})")
+        self._battery_cache[cache_key] = (None, now)
         return None
+    
+    def set_scan_button_loading(self, loading):
+        """Set scan button to spinning/loading state"""
+        if loading:
+            self.scan_button.add_css_class("refresh-spinning")
+            self.scan_button.set_sensitive(False)
+        else:
+            self.scan_button.remove_css_class("refresh-spinning")
+            self.scan_button.set_sensitive(True)
 
     # Starts a scan for nearby Bluetooth devices for a few seconds.
     def scan_devices(self):
         if not self.bluetooth_enabled:
             return False
 
+        # Show spinning button during scan
+        self.set_scan_button_loading(True)
+        
         self.command_queue.put("bluetoothctl scan on")
-        GLib.timeout_add_seconds(5, lambda: self.command_queue.put("bluetoothctl scan off"))
+        
+        def stop_scan_and_update():
+            self.command_queue.put("bluetoothctl scan off")
+            self.update_devices()
+            self.set_scan_button_loading(False)
+            return False
+        
+        GLib.timeout_add_seconds(5, stop_scan_and_update)
 
         return True
 

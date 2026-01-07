@@ -156,7 +156,7 @@ class ClipboardRow(Gtk.ListBoxRow):
     def create_expandable_body_placeholder(self):
         self.body_revealer = Gtk.Revealer(
             transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN,
-            transition_duration=300,
+            transition_duration=150,
             reveal_child=False
         )
         self.main_box.append(self.body_revealer)
@@ -290,11 +290,11 @@ class ClipboardRow(Gtk.ListBoxRow):
 
         if self.is_image:
             self.image_spinner.start()
-            thread = threading.Thread(target=self.load_image_worker)
+            thread = threading.Thread(target=self.load_image_worker, daemon=True)
             thread.start()
         else:
             self.text_spinner.start()
-            thread = threading.Thread(target=self.load_text_worker)
+            thread = threading.Thread(target=self.load_text_worker, daemon=True)
             thread.start()
 
     def load_image_worker(self):
@@ -442,7 +442,7 @@ class ClipboardRow(Gtk.ListBoxRow):
 
     def on_delete_clicked(self, button):
         self.add_css_class("deleting")
-        GLib.timeout_add(300, self.perform_delete)
+        GLib.timeout_add(200, self.perform_delete)
 
     def perform_delete(self):
         try:
@@ -475,7 +475,7 @@ class ClipboardWidget(Gtk.Box):
         self.history_monitor_id = 0
         self.current_filter_mode = "all"
         self.current_page = 0
-        self.items_per_page = 5
+        self.items_per_page = 10
         self.total_pages = 0
         self.search_timeout_id = 0
         self.visible_rows = []
@@ -494,7 +494,7 @@ class ClipboardWidget(Gtk.Box):
 
         self.is_active = True
         self.load_history(is_initial_load=True)
-        self.history_monitor_id = GLib.timeout_add_seconds(5, self.load_history, False)
+        self.history_monitor_id = GLib.timeout_add_seconds(10, self.load_history, False)
 
     def deactivate(self):
         if not self.is_active: return

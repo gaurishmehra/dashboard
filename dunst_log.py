@@ -23,8 +23,8 @@ except ImportError as e:
 CONFIG = {
     'log_file': Path.home() / '.local/share/dunst/notifications.json',
     'image_dir': Path.home() / '.local/share/dunst/images',
-    'max_log_entries': 10000,
-    'image_quality': 95,
+    'max_log_entries': 5000,
+    'image_quality': 85,
     'debug_mode': False,
     'save_all_formats': False,
     'capture_icon_paths': True,  # New option to enable/disable icon path capture
@@ -91,6 +91,45 @@ class NotificationLogger:
         except Exception as e:
             self.logger.error(f"Failed to create directories: {e}")
             sys.exit(1)
+
+    def convert_argb_to_rgba(self, img_array: np.ndarray) -> np.ndarray:
+        """Convert D-Bus ARGB (little-endian BGRA bytes) to straight RGBA and unpremultiply alpha.
+
+        The notification spec delivers ARGB32 with premultiplied alpha; in memory (little-endian)
+        the channel order is BGRA. We reorder to RGBA and unpremultiply to avoid green/blue tints.
+        """
+        if img_array.ndim != 3 or img_array.shape[2] != 4:
+            return img_array
+
+        # Create output array to avoid modifying input
+        result = np.zeros_like(img_array, dtype=np.uint8)
+        
+        # Extract channels from BGRA format
+        b = img_array[:, :, 0].astype(np.float32)
+        g = img_array[:, :, 1].astype(np.float32)
+        r = img_array[:, :, 2].astype(np.float32)
+        a = img_array[:, :, 3].astype(np.float32)
+        
+        # Create mask for non-zero alpha pixels
+        alpha_mask = a > 0
+        
+        # Unpremultiply only where alpha > 0
+        # For premultiplied alpha: color_premult = color_straight * (alpha / 255)
+        # So: color_straight = color_premult * 255 / alpha
+        with np.errstate(invalid='ignore', divide='ignore'):
+            scale = np.where(alpha_mask, 255.0 / a, 0.0)
+            
+            r_straight = np.where(alpha_mask, np.clip(r * scale, 0, 255), 0)
+            g_straight = np.where(alpha_mask, np.clip(g * scale, 0, 255), 0)
+            b_straight = np.where(alpha_mask, np.clip(b * scale, 0, 255), 0)
+        
+        # Store in RGBA order
+        result[:, :, 0] = r_straight.astype(np.uint8)
+        result[:, :, 1] = g_straight.astype(np.uint8)
+        result[:, :, 2] = b_straight.astype(np.uint8)
+        result[:, :, 3] = a.astype(np.uint8)
+
+        return result
 
     # This function digs through the raw, messy output from D-Bus to find
     # and piece together the binary image data and its metadata (like width and height).
@@ -247,6 +286,11 @@ class NotificationLogger:
 
             img_array = img_array.reshape((height, width, channels))
 
+            # Normalize channel order to RGBA and unpremultiply to avoid color shifts
+            if channels == 4:
+                img_array = self.convert_argb_to_rgba(img_array)
+                channels = 4
+
             safe_timestamp = re.sub(r'[^\w\-_.]', '_', timestamp)
             safe_app_name = re.sub(r'[^\w\-_.]', '_', app_name)
 
@@ -348,7 +392,7 @@ class NotificationLogger:
         elif channels == 3:
             formats_to_try = [
                 ('RGB', img_array, 'RGB'),
-                ('BGR', img_array[:, :, [2, 1, 0]], 'RGB'),
+                # ('BGR', img_array[:, :, [2, 1, 0]], 'RGB'),
             ]
 
         for format_name, array, pil_mode in formats_to_try:

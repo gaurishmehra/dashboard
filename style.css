@@ -1,12 +1,12 @@
 window {
     background: rgba(30, 30, 35, 0.5);
     border-radius: 16px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    /* box-shadow removed - very expensive on iGPU */
     border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .sidebar {
-    background-image: linear-gradient(to bottom, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
+    background: rgba(255, 255, 255, 0.05);
     border-radius: 12px;
     border-right: 1px solid rgba(255, 255, 255, 0.1);
 }
@@ -15,7 +15,7 @@ window {
     background: transparent;
     border: 1px solid transparent;
     color: rgba(255, 255, 255, 0.6);
-    transition: all 250ms ease-in-out;
+    transition: background 150ms ease-in-out, color 150ms ease-in-out;
     border-radius: 30px;
 }
 
@@ -28,7 +28,7 @@ window {
     background: rgba(255, 182, 193, 0.15);
     color: white;
     border: 1px solid rgba(255, 182, 193, 0.25);
-    box-shadow: 0 0 12px rgba(255, 182, 193, 0.25);
+    /* box-shadow glow removed - expensive on iGPU */
 }
 
 searchbar,
@@ -38,24 +38,20 @@ entry {
     border-radius: 8px;
     color: white;
     padding: 2px 12px;
-    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
 searchbar:focus,
 entry:focus {
-    border-color: rgba(255, 182, 193, 0.15);
-    box-shadow: 0 0 0 3px rgba(255, 182, 193, 0.2);
+    border-color: rgba(255, 182, 193, 0.4);
 }
 
-/* Styling for linked button groups (like the clipboard filter) */
-.linked > button { /* Use 'button' to apply to ToggleButton as well */
+.linked > button {
     background: rgba(0, 0, 0, 0.2);
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 0;
     color: rgba(255, 255, 255, 0.7);
     padding: 0px 12px;
-    transition: all 150ms ease;
-    box-shadow: none; /* Reset any default button shadows */
+    transition: background 100ms ease, color 100ms ease;
     border-radius: 8px;
 }
 
@@ -98,15 +94,12 @@ entry:focus {
     min-height: 20px;
 }
 
-/* --- NEW: Deletion animation for clipboard items --- */
 @keyframes fade-out-and-shrink {
     from {
         opacity: 1;
-        max-height: 100px; /* or some large enough value */
     }
     to {
         opacity: 0;
-        max-height: 0;
         margin-top: 0;
         margin-bottom: 0;
         padding-top: 0;
@@ -116,11 +109,8 @@ entry:focus {
 }
 
 .notification-row.deleting {
-    animation: fade-out-and-shrink 300ms ease-out forwards;
-    overflow: hidden;
+    animation: fade-out-and-shrink 200ms ease-out forwards;
 }
-/* --- End New --- */
-
 
 .location-label {
     font-size: 13px;
@@ -132,7 +122,6 @@ entry:focus {
     font-size: 48px;
     font-weight: bold;
     color: white;
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
 }
 
 .weather-desc {
@@ -174,7 +163,7 @@ entry:focus {
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 12px;
     padding: 12px 8px;
-    transition: all 200ms ease;
+    transition: background 100ms ease;
 }
 
 .hourly-card:hover {
@@ -204,7 +193,7 @@ entry:focus {
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 12px;
     padding: 12px 16px;
-    transition: all 200ms ease;
+    transition: background 100ms ease, border-color 100ms ease;
 }
 
 .daily-row:hover {
@@ -257,17 +246,15 @@ entry:focus {
 
 .notifications-list {
     background: transparent;
-    border: none; /* Remove any default listbox border */
+    border: none;
 }
 
-/* Base style for ExpanderRow and ListBoxRow */
 .notification-row, AdwExpanderRow {
     background-color: rgba(255, 255, 255, 0.03);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 12px;
     margin: 4px 0px;
-    transition: all 150ms ease;
-    box-shadow: none;
+    transition: background-color 100ms ease, border-color 100ms ease;
 }
 
 .notification-row:hover, AdwExpanderRow:hover {
@@ -275,12 +262,12 @@ entry:focus {
     border-color: rgba(255, 255, 255, 0.15);
 }
 
-.notification-row:selected, AdwExpanderRow:selected {
+.notification-row:selected, AdwExpanderRow:checked {
     background-color: rgba(255, 182, 193, 0.15);
     border-color: rgba(255, 182, 193, 0.4);
 }
 
-.notification-row.expanded, AdwExpanderRow:expanded {
+.notification-row.expanded {
     background-color: rgba(255, 255, 255, 0.08);
     border-color: rgba(255, 255, 255, 0.2);
 }
@@ -305,14 +292,14 @@ entry:focus {
 }
 
 .body-label {
-    font-size: 13px; /* Slightly larger for readability */
+    font-size: 13px;
     color: rgba(255, 255, 255, 0.85);
     line-height: 1.5;
 }
 
 .expand-icon {
     color: rgba(255, 255, 255, 0.6);
-    transition: transform 150ms ease;
+    transition: transform 100ms ease;
 }
 
 .title-large {
@@ -329,32 +316,29 @@ entry:focus {
     font-size: 16px;
     font-weight: bold;
     color: rgba(255, 255, 255, 0.95);
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
 }
 
 .artist-label {
     font-size: 13px;
     color: rgba(255, 255, 255, 0.8);
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
 }
 
 .control-button {
     background: rgba(255, 255, 255, 0.1);
     border: 1px solid rgba(255, 255, 255, 0.2);
     color: rgba(255, 255, 255, 0.9);
-    transition: all 100ms ease;
+    transition: background 100ms ease;
 }
 
 .control-button:hover {
     background: rgba(255, 255, 255, 0.2);
-    transform: scale(1.05);
 }
 
 .play-button {
     background: rgba(255, 255, 255, 0.2);
     border: 2px solid rgba(255, 255, 255, 0.4);
     color: rgba(255, 255, 255, 0.95);
-    transition: all 100ms ease;
+    transition: background 100ms ease;
 }
 
 .play-button:hover {
@@ -365,7 +349,7 @@ entry:focus {
     background: rgba(255, 255, 255, 0.1);
     border: 1px solid rgba(255, 255, 255, 0.2);
     color: rgba(255, 255, 255, 0.7);
-    transition: all 100ms ease;
+    transition: background 100ms ease, color 100ms ease;
 }
 
 .player-icon:hover {
@@ -392,22 +376,20 @@ entry:focus {
 .device-header {
     background: rgba(255, 255, 255, 0.05);
     border-radius: 16px;
-    transition: all 150ms ease;
+    transition: background 100ms ease;
     padding: 12px 16px;
 }
 
 .info-tile {
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05));
+    background: rgba(255, 255, 255, 0.08);
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 12px;
     padding: 12px;
-    transition: all 200ms ease;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    transition: border-color 100ms ease;
 }
 
 .info-tile:hover {
-    border: 1px solid rgba(255, 255, 255, 0.55);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.35);
 }
 
 .section-title {
@@ -423,32 +405,28 @@ entry:focus {
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 12px;
     color: rgba(255, 255, 255, 0.9);
-    transition: all 150ms ease;
+    transition: background 100ms ease, border-color 100ms ease;
 }
 
 .action-button:hover {
     background: rgba(255, 255, 255, 0.25);
     border-color: rgba(255, 255, 255, 0.3);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 button.suggested-action {
     background: rgba(100, 255, 100, 0.08);
     border: 1px solid rgba(100, 255, 100, 0.15);
     color: rgba(255, 255, 255, 0.9);
-    transition: all 150ms ease;
+    transition: background 100ms ease, border-color 100ms ease;
 }
 
 button.suggested-action:hover {
-    /* background: rgba(100, 255, 100, 0.1); */
     border-color: rgba(100, 255, 100, 0.3);
-    box-shadow: 0 4px 12px rgba(100, 255, 100, 0.3);
 }
 
 button.suggested-action:disabled {
     background: rgba(100, 255, 100, 0.04);
     border: 1px solid rgba(100, 255, 100, 0.05);
     color: rgba(255, 255, 255, 0.3);
-    box-shadow: none;
 }
 
 button.destructive-action {
@@ -456,18 +434,30 @@ button.destructive-action {
     border: 1px solid rgba(255, 100, 100, 0.15);
     border-radius: 12px;
     color: rgba(255, 255, 255, 0.9);
-    transition: all 150ms ease;
+    transition: background 100ms ease, border-color 100ms ease;
 }
 
 button.destructive-action:hover {
     background: rgba(255, 100, 100, 0.1);
     border-color: rgba(255, 100, 100, 0.3);
-    box-shadow: 0 4px 12px rgba(255, 100, 100, 0.3);
 }
 
 button.destructive-action:disabled {
     background: rgba(255, 100, 100, 0.04);
     border: 1px solid rgba(255, 100, 100, 0.05);
     color: rgba(255, 255, 255, 0.3);
-    box-shadow: none;
+}
+
+/* Spinning refresh button animation */
+@keyframes spin {
+    from { -gtk-icon-transform: rotate(0deg); }
+    to { -gtk-icon-transform: rotate(360deg); }
+}
+
+button.refresh-spinning {
+    opacity: 0.6;
+}
+
+button.refresh-spinning image {
+    animation: spin 1s linear infinite;
 }

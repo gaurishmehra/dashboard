@@ -10,12 +10,30 @@ import math
 import threading
 import queue
 import warnings
-import urllib.request
+import hashlib
+import shlex
+import time
+
+# Lazy import for requests - deferred to first use to speed up module load
+_requests = None
+def _get_requests():
+    global _requests
+    if _requests is None:
+        try:
+            import requests
+            _requests = requests
+        except ImportError:
+            _requests = False
+    return _requests if _requests else None
 
 warnings.filterwarnings("ignore", ".*pixbuf_get_from_surface.*", DeprecationWarning)
 
 CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".config", "dashboard")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "last_player.conf")
+IMAGE_CACHE_DIR = os.path.join(CONFIG_DIR, "image_cache")
+
+# Ensure cache directory exists
+os.makedirs(IMAGE_CACHE_DIR, exist_ok=True)
 
 # Saves the name of the last used media player to a configuration file.
 # This helps the app remember your preference between sessions.
@@ -50,6 +68,7 @@ class CircularProgressWidget(Gtk.DrawingArea):
         super().__init__()
         self.set_size_request(220, 220)
         self.progress = 0.0
+        self._last_drawn_progress = -1.0  # Track last drawn state to avoid redundant redraws
         self.set_draw_func(self.draw_progress)
 
         gesture_click = Gtk.GestureClick()
@@ -65,9 +84,14 @@ class CircularProgressWidget(Gtk.DrawingArea):
         self.is_hovering = False
 
     # Updates the visual progress of the circle. Expects a value between 0.0 and 1.0.
+    # Only triggers a redraw if progress changed significantly (>0.5% change)
     def set_progress(self, progress):
-        self.progress = max(0.0, min(1.0, progress))
-        self.queue_draw()
+        new_progress = max(0.0, min(1.0, progress))
+        # Only redraw if progress changed by more than 0.5% - reduces GPU work significantly
+        if abs(new_progress - self._last_drawn_progress) > 0.005:
+            self.progress = new_progress
+            self._last_drawn_progress = new_progress
+            self.queue_draw()
 
     # Stores a function that will be called when the user clicks to seek.
     def set_seek_callback(self, callback):
@@ -162,16 +186,40 @@ class CircularImage(Gtk.DrawingArea):
             self._set_pixbuf_on_main_thread(None)
 
     # Runs in a background thread to download an image from a URL without
-    # blocking the main UI.
+    # blocking the main UI. Uses caching for faster repeated loads.
     def _load_url_thread(self, url):
         try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
-                urllib.request.urlretrieve(url, tmp_file.name)
-                pixbuf = GdkPixbuf.Pixbuf.new_from_file(tmp_file.name)
+            # Create a cache key from the URL
+            url_hash = hashlib.md5(url.encode()).hexdigest()[:16]
+            cache_path = os.path.join(IMAGE_CACHE_DIR, f"{url_hash}.jpg")
+            
+            # Check cache first
+            if os.path.exists(cache_path):
+                pixbuf = GdkPixbuf.Pixbuf.new_from_file(cache_path)
                 GLib.idle_add(self._set_pixbuf_on_main_thread, pixbuf)
-                os.unlink(tmp_file.name)
+                return
+            
+            # Download with timeout - use requests if available, else urllib
+            requests = _get_requests()
+            if requests:
+                response = requests.get(url, timeout=3, stream=True)
+                response.raise_for_status()
+                with open(cache_path, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+            else:
+                import urllib.request
+                urllib.request.urlretrieve(url, cache_path)
+            
+            pixbuf = GdkPixbuf.Pixbuf.new_from_file(cache_path)
+            GLib.idle_add(self._set_pixbuf_on_main_thread, pixbuf)
         except Exception as e:
-            print(f"Error downloading or processing image from URL '{url}': {e}")
+            # Clean up failed cache file
+            if 'cache_path' in locals() and os.path.exists(cache_path):
+                try:
+                    os.unlink(cache_path)
+                except:
+                    pass
             GLib.idle_add(self._set_pixbuf_on_main_thread, None)
 
     # Starts the background thread to download and display an image from a URL.
@@ -296,6 +344,7 @@ class MediaPlayerWidget(Gtk.Box):
         self.players = []
         self.player_buttons = []
         self._last_known_art_url = None
+        self._last_known_title = None  # Track title changes to reset time display
         self.saved_player_preference = load_last_player()
 
         self._is_seeking = False
@@ -317,7 +366,22 @@ class MediaPlayerWidget(Gtk.Box):
             try:
                 command = self.command_queue.get()
                 if command:
-                    subprocess.run(command, shell=True, capture_output=True, text=True, timeout=2)
+                    # Convert string command to list for security/performance
+                    if isinstance(command, str):
+                        cmd_list = shlex.split(command)
+                    else:
+                        cmd_list = command
+                    # Retry up to 3 times for reliability
+                    for attempt in range(3):
+                        try:
+                            result = subprocess.run(cmd_list, capture_output=True, text=True, timeout=3)
+                            if result.returncode == 0:
+                                break
+                            # Small delay before retry
+                            time.sleep(0.1)
+                        except subprocess.TimeoutExpired:
+                            if attempt == 2:
+                                print(f"Command timed out after 3 attempts: {command}")
                 self.command_queue.task_done()
             except queue.Empty:
                 continue
@@ -411,10 +475,14 @@ class MediaPlayerWidget(Gtk.Box):
     # like getting the list of players.
     def _run_sync_command(self, cmd):
         try:
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=0.5)
+            # Convert string command to list for security/performance
+            if isinstance(cmd, str):
+                cmd_list = shlex.split(cmd)
+            else:
+                cmd_list = cmd
+            result = subprocess.run(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=0.3)
             return result.stdout.strip() if result.returncode == 0 else None
         except subprocess.TimeoutExpired:
-            print(f"Timeout running command: {cmd}")
             return None
         except Exception:
             return None
@@ -423,7 +491,9 @@ class MediaPlayerWidget(Gtk.Box):
     # to be executed by the background worker.
     def _queue_command(self, command):
         if self.current_player:
-            self.command_queue.put(f"playerctl -p {self.current_player} {command}")
+            # Quote player name to handle names with special characters
+            player = shlex.quote(self.current_player)
+            self.command_queue.put(f"playerctl -p {player} {command}")
 
     # Handles clicks on the play/pause button. It instantly updates the
     # icon for responsiveness and then queues the actual command.
@@ -456,7 +526,7 @@ class MediaPlayerWidget(Gtk.Box):
         if not self.is_active:
             return GLib.SOURCE_REMOVE
 
-        players_output = self._run_sync_command("playerctl -l 2>/dev/null")
+        players_output = self._run_sync_command(["playerctl", "-l"])
         new_players = [p for p in (players_output.split('\n') if players_output else []) if 'firefox' not in p.lower()]
 
         if new_players != self.players or force_update:
@@ -474,17 +544,20 @@ class MediaPlayerWidget(Gtk.Box):
         if self.current_player != target_player:
             self.current_player = target_player
             self._last_known_art_url = None
+            self._last_known_title = None  # Reset on player change
+            self._is_seeking = False
             self.update_player_buttons_state()
 
         if not self.current_player:
             self._reset_ui_to_default()
             return GLib.SOURCE_CONTINUE
 
-        metadata_output = self._run_sync_command(
-            f"playerctl -p {self.current_player} metadata --format "
-            "'{{status}};{{mpris:length}};{{volume}};{{mpris:artUrl}};{{title}};{{artist}}'"
-        )
-        position_str = self._run_sync_command(f"playerctl -p {self.current_player} position")
+        # Batched command: get status, position, length, volume, art, title, artist in ONE call
+        metadata_output = self._run_sync_command([
+            "playerctl", "-p", self.current_player, "metadata", "--format",
+            "{{status}};{{position}};{{mpris:length}};{{volume}};{{mpris:artUrl}};{{title}};{{artist}}"
+        ])
+        position_str = None  # Position now included in batched call
 
         if not metadata_output:
             self.current_player = None
@@ -492,19 +565,39 @@ class MediaPlayerWidget(Gtk.Box):
             return GLib.SOURCE_CONTINUE
 
         try:
-            status, length_us_str, vol_str, art_url, title, artist = metadata_output.split(';', 5)
+            # Parse batched output: status;position;length;volume;artUrl;title;artist
+            status, position_us_str, length_us_str, vol_str, art_url, title, artist = metadata_output.split(';', 6)
 
             is_playing = (status == 'Playing')
             self.play_pause_button.set_icon_name("media-playback-pause-symbolic" if is_playing else "media-playback-start-symbolic")
             self.title_label.set_label(title or "Unknown Title")
             self.artist_label.set_label(artist or "Unknown Artist")
 
-            try: length_s = int(float(length_us_str) / 1000000)
-            except (ValueError, TypeError): length_s = 0
-            try: position_s = int(float(position_str))
-            except (ValueError, TypeError): position_s = 0
+            # Detect track change and reset time state
+            current_title = f"{title}|{artist}"
+            if current_title != self._last_known_title:
+                self._last_known_title = current_title
+                # Reset seeking state on track change
+                self._is_seeking = False
 
-            if position_s > length_s and length_s > 0: position_s = length_s
+            # Parse length (in microseconds from MPRIS)
+            try:
+                length_s = int(float(length_us_str) / 1000000)
+                if length_s < 0:
+                    length_s = 0
+            except (ValueError, TypeError):
+                length_s = 0
+            
+            # Parse position (also in microseconds from MPRIS)
+            try:
+                position_s = int(float(position_us_str) / 1000000) if position_us_str else 0
+                # Validate position is within bounds
+                if position_s < 0:
+                    position_s = 0
+                elif length_s > 0 and position_s > length_s:
+                    position_s = length_s
+            except (ValueError, TypeError):
+                position_s = 0
 
             if not self._is_seeking:
                 self.time_label.set_text(f"{self.format_time(position_s)} / {self.format_time(length_s)}")
@@ -528,17 +621,23 @@ class MediaPlayerWidget(Gtk.Box):
             for w in [self.play_pause_button, self.prev_button, self.next_button, self.volume_scale, self.progress_widget]:
                 w.set_sensitive(True)
 
+            # Adaptive polling: 1s when playing, 5s when paused (reduces CPU when idle)
+            if self.update_timer_id:
+                GLib.source_remove(self.update_timer_id)
+            poll_interval = 1000 if is_playing else 5000
+            self.update_timer_id = GLib.timeout_add(poll_interval, self.update_all_info)
+
         except Exception as e:
-            print(f"Error parsing metadata ('{metadata_output}' and '{position_str}'): {e}")
+            print(f"Error parsing metadata ('{metadata_output}'): {e}")
             self._reset_ui_to_default()
 
-        return GLib.SOURCE_CONTINUE
+        return GLib.SOURCE_REMOVE  # We set up a new timer, so remove this one
 
     # Called when the user clicks the circular progress bar. It calculates
     # the new position and queues a seek command.
     def on_seek(self, progress):
         if not self.current_player: return
-        length_us_str = self._run_sync_command(f"playerctl -p {self.current_player} metadata mpris:length")
+        length_us_str = self._run_sync_command(["playerctl", "-p", self.current_player, "metadata", "mpris:length"])
 
         try: total_seconds = int(float(length_us_str) / 1000000)
         except (ValueError, TypeError, AttributeError): return
@@ -585,6 +684,8 @@ class MediaPlayerWidget(Gtk.Box):
         self.progress_widget.set_progress(0)
         self.play_pause_button.set_icon_name("media-playback-start-symbolic")
         self._last_known_art_url = None
+        self._last_known_title = None  # Reset title tracking
+        self._is_seeking = False  # Reset seeking state
         for w in [self.play_pause_button, self.prev_button, self.next_button, self.volume_scale, self.progress_widget]:
             w.set_sensitive(False)
 

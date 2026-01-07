@@ -8,6 +8,8 @@ import threading
 import queue
 import sys
 import warnings
+import json
+import os
 
 warnings.filterwarnings("ignore")
 
@@ -282,6 +284,9 @@ class WiFiPasswordDialog(Adw.MessageDialog):
 # displays them, and handles turning the WiFi radio on and off.
 # Now also includes Ethernet/LAN connection management.
 class WiFiWidget(Gtk.Box):
+    # Cache file path for persistent storage
+    CACHE_FILE = os.path.join(os.path.dirname(os.path.realpath(__file__)), '.wifi_cache.json')
+    
     # Prepares the widget by setting up state variables and starting a background thread.
     # This thread runs shell commands so the user interface doesn't freeze.
     def __init__(self):
@@ -303,10 +308,49 @@ class WiFiWidget(Gtk.Box):
         # Data loading state
         self.wifi_data_loaded = False
         self.ethernet_data_loaded = False
+        self._has_cached_data = False  # Track if we have any cached data to show
+        self._is_loading = False  # Track if we're currently loading
+
+        # Load cache from file on startup
+        self.load_cache_from_file()
 
         self.command_thread = threading.Thread(target=self.command_worker, daemon=True)
         self.command_thread.start()
         self.create_ui()
+    
+    def load_cache_from_file(self):
+        """Load cached network data from file"""
+        try:
+            if os.path.exists(self.CACHE_FILE):
+                with open(self.CACHE_FILE, 'r') as f:
+                    cache_data = json.load(f)
+                
+                self.connected_network = cache_data.get('connected_network')
+                self.available_networks = cache_data.get('available_networks', [])
+                self.wifi_enabled = cache_data.get('wifi_enabled', False)
+                self.connected_ethernet = cache_data.get('connected_ethernet')
+                self.available_ethernet = cache_data.get('available_ethernet', [])
+                self._has_cached_data = True
+                print("WiFi cache loaded from file")
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"Error loading WiFi cache: {e}")
+            self._has_cached_data = False
+    
+    def save_cache_to_file(self):
+        """Save current network data to cache file"""
+        try:
+            cache_data = {
+                'connected_network': self.connected_network,
+                'available_networks': self.available_networks,
+                'wifi_enabled': self.wifi_enabled,
+                'connected_ethernet': self.connected_ethernet,
+                'available_ethernet': self.available_ethernet
+            }
+            with open(self.CACHE_FILE, 'w') as f:
+                json.dump(cache_data, f, indent=2)
+            print("WiFi cache saved to file")
+        except IOError as e:
+            print(f"Error saving WiFi cache: {e}")
 
     # Starts the automatic updates when the widget becomes visible.
     def activate(self):
@@ -314,14 +358,21 @@ class WiFiWidget(Gtk.Box):
         self.is_active = True
         print("WiFiWidget Activated")
         
-        # Show loading immediately, then fetch data in background
-        GLib.idle_add(self.show_loading)
-        self.fetch_all_data()
+        # If we have cached data, show it immediately without spinner
+        if self._has_cached_data:
+            # Just show cached data, fetch updates silently in background
+            self.wifi_data_loaded = True
+            self.ethernet_data_loaded = True
+            GLib.idle_add(self.update_ui)
+            self.fetch_all_data(show_spinner=False)
+        else:
+            # First time load - show spinner
+            self.fetch_all_data(show_spinner=True)
         
         if self.update_timer_id is None:
-            self.update_timer_id = GLib.timeout_add_seconds(5, self.update_all_connections)
+            self.update_timer_id = GLib.timeout_add_seconds(10, self.update_all_connections)
         if self.scan_timer_id is None:
-            self.scan_timer_id = GLib.timeout_add_seconds(20, self.scan_networks)
+            self.scan_timer_id = GLib.timeout_add_seconds(60, self.scan_networks)
 
     # Stops the automatic updates when the widget is hidden to save resources.
     def deactivate(self):
@@ -334,14 +385,25 @@ class WiFiWidget(Gtk.Box):
     # Updates both WiFi and Ethernet connections periodically.
     def update_all_connections(self):
         if not self.is_active: return False
-        self.fetch_all_data()
+        self.fetch_all_data(show_spinner=False)  # No spinner on periodic updates
         return True
 
     # Fetch all data in background threads like the weather widget
-    def fetch_all_data(self):
+    def fetch_all_data(self, show_spinner=False):
+        # Prevent multiple simultaneous fetches
+        if self._is_loading:
+            return
+        
+        self._is_loading = True
         self.wifi_data_loaded = False
         self.ethernet_data_loaded = False
-        GLib.idle_add(self.show_loading)
+        
+        # Show spinning scan button (called from main thread, no need for idle_add)
+        self.set_scan_button_loading(True)
+        
+        # Only show loading spinner on first load (no cached data)
+        if show_spinner and not self._has_cached_data:
+            self.show_loading()
         
         thread_wifi = threading.Thread(target=self.fetch_wifi_in_thread, daemon=True)
         thread_ethernet = threading.Thread(target=self.fetch_ethernet_in_thread, daemon=True)
@@ -374,6 +436,10 @@ class WiFiWidget(Gtk.Box):
 
     def check_data_loaded(self):
         if self.wifi_data_loaded and self.ethernet_data_loaded:
+            self._has_cached_data = True  # Mark that we have cached data now
+            self._is_loading = False  # Mark loading as complete
+            self.set_scan_button_loading(False)  # Stop spinning
+            self.save_cache_to_file()  # Save cache to file
             self.update_ui_after_data_fetch()
 
     def update_wifi_status_threaded(self):
@@ -500,14 +566,19 @@ class WiFiWidget(Gtk.Box):
         except Exception as e:
             print(f"Error showing error state: {e}")
 
-    # This function runs in a separate thread, executing shell commands from a queue.
+    # This function runs in a separate thread, executing commands from a queue.
     # This prevents the main application from freezing while waiting for commands to finish.
     def command_worker(self):
         while True:
             try:
                 command = self.command_queue.get()
                 print(f"Executing: {command}")
-                result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=25)
+                # Convert string command to list for better performance (no shell overhead)
+                if isinstance(command, str):
+                    cmd_list = command.split()
+                else:
+                    cmd_list = command
+                result = subprocess.run(cmd_list, capture_output=True, text=True, timeout=25)
                 if result.returncode != 0:
                     print(f"Error: {result.stderr.strip()}")
                 else:
@@ -527,19 +598,39 @@ class WiFiWidget(Gtk.Box):
         ensure_pink_switch_css()
         self.wifi_switch.add_css_class("pink-toggle")
         self.wifi_switch.connect("notify::active", self.on_wifi_toggled)
-        scan_button = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Scan for networks"); scan_button.add_css_class("circular"); scan_button.connect("clicked", lambda b: self.scan_networks())
-        header_box.append(title_label); header_box.append(scan_button); header_box.append(self.wifi_switch)
+        self.scan_button = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Scan for networks"); self.scan_button.add_css_class("circular"); self.scan_button.connect("clicked", lambda b: self.scan_networks())
+        header_box.append(title_label); header_box.append(self.scan_button); header_box.append(self.wifi_switch)
         scrolled_window = Gtk.ScrolledWindow(); scrolled_window.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC); scrolled_window.set_vexpand(True); scrolled_window.add_css_class("invisible-scroll")
         self.content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8); scrolled_window.set_child(self.content_box)
         self.append(header_box); self.append(scrolled_window)
+        
+        # Display cached data if available, otherwise will show loading when activated
+        if self._has_cached_data:
+            self.wifi_switch.set_active(self.wifi_enabled)
+            self.wifi_data_loaded = True
+            self.ethernet_data_loaded = True
+            self.update_ui()
+    
+    def set_scan_button_loading(self, loading):
+        """Set scan button to spinning/loading state"""
+        if loading:
+            self.scan_button.add_css_class("refresh-spinning")
+            self.scan_button.set_sensitive(False)
+        else:
+            self.scan_button.remove_css_class("refresh-spinning")
+            self.scan_button.set_sensitive(True)
 
-    # A simple helper to run a shell command and return its output.
+    # A simple helper to run a command and return its output.
     def run_wifi_command(self, command):
         try:
-            result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=10)
+            # Convert string command to list for better performance (no shell overhead)
+            if isinstance(command, str):
+                cmd_list = command.split()
+            else:
+                cmd_list = command
+            result = subprocess.run(cmd_list, capture_output=True, text=True, timeout=5)
             return result.stdout.strip() if result.returncode == 0 else ""
         except Exception as e:
-            print(f"Run command error: {e}")
             return ""
 
     # Legacy methods kept for compatibility but now use threaded approach
@@ -569,17 +660,19 @@ class WiFiWidget(Gtk.Box):
 
     # Sends a command to tell the system to scan for WiFi networks.
     def scan_networks(self):
-        if self.wifi_enabled: 
+        if self.wifi_enabled:
+            # Start spinner immediately when button is clicked
+            self.set_scan_button_loading(True)
             self.command_queue.put("nmcli dev wifi rescan")
-            # Refresh data after scan
-            GLib.timeout_add_seconds(3, lambda: self.fetch_all_data() or False)
+            # Refresh data after scan - show spinner only if no cached data
+            GLib.timeout_add_seconds(2, lambda: self.fetch_all_data(show_spinner=not self._has_cached_data) or False)
         return True
 
     # This function is called when the user clicks the main WiFi on/off switch.
     def on_wifi_toggled(self, switch, *args):
         self.command_queue.put(f"nmcli radio wifi {'on' if switch.get_active() else 'off'}")
-        # Refresh data after toggle
-        GLib.timeout_add_seconds(2, lambda: self.fetch_all_data() or False)
+        # Refresh data after toggle (no spinner, just update)
+        GLib.timeout_add_seconds(2, lambda: self.fetch_all_data(show_spinner=False) or False)
 
     # Checks if a saved connection profile already exists for a given network SSID.
     def does_connection_exist(self, ssid):
@@ -609,7 +702,7 @@ class WiFiWidget(Gtk.Box):
         else:
             self.command_queue.put(f"nmcli c down '{ssid}'")
 
-        GLib.timeout_add_seconds(8, lambda: self.fetch_all_data() or False)
+        GLib.timeout_add_seconds(5, lambda: self.fetch_all_data(show_spinner=False) or False)
 
     # This is triggered when a user clicks the "Connect" or "Disconnect" button for an Ethernet connection.
     def on_ethernet_connect(self, connection_info, connect=True):
@@ -622,7 +715,7 @@ class WiFiWidget(Gtk.Box):
         else:
             self.command_queue.put(f"nmcli c down '{conn_name}'")
 
-        GLib.timeout_add_seconds(5, lambda: self.fetch_all_data() or False)
+        GLib.timeout_add_seconds(3, lambda: self.fetch_all_data(show_spinner=False) or False)
 
     # Creates and displays the password dialog for a specific network.
     def show_password_dialog(self, ssid):
@@ -639,7 +732,7 @@ class WiFiWidget(Gtk.Box):
                 if widget: widget.set_loading(True)
                 connect_cmd = self.get_connect_and_save_command(ssid, password)
                 self.command_queue.put(connect_cmd)
-                GLib.timeout_add_seconds(12, lambda: self.fetch_all_data() or False)
+                GLib.timeout_add_seconds(8, lambda: self.fetch_all_data(show_spinner=False) or False)
         dialog.destroy()
 
     # Clears and redraws the list of network widgets based on the latest scan data.
