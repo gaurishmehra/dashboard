@@ -1,273 +1,215 @@
-OUTDATED AS SHIT (IG) WILL UPDATE LATER (if i remember)
+# Dashboard
 
-How to use
-===========
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/gaurishmehra/dashboard.git
-   cd dashboard
-    ```
-    Install dunst and run it (Make sure no other notification daemon is running):
-    ```bash
-    sudo pacman -S dunst
-    dunst &
-    ```
-2. Make the script executable:
-   ```bash
-   chmod +x dunst_log.py
-   ```
-3. Run the script:
-   ```bash
-    ./dunst_log.py &
-   ```
-   You should ideally put the script in the hyprland config or make a systemd service for it.
-   ```bash
-   exec-once = /path/to/dunst_log.py
-   ```
-4. Run the dashboard:
-   ```bash
-   python dashboard.py
-   ```
-5. (Optional) add the following lines to your hyprland config file:
-   ```bash
-   windowrulev2 = float, class:^(one.gaurish.Dashboard)$
-   windowrulev2 = size 300 450, class:^(one.gaurish.Dashboard)$
-   windowrulev2 = center, class:^(one.gaurish.Dashboard)$
-   windowrulev2 = pin, class:^(one.gaurish.Dashboard)$
-   windowrulev2 = noborder, class:^(one.gaurish.Dashboard)$
-   ```
-    I recommed making it a keybind to toggle the dashboard:
-    ```bash
-    #!/bin/bash
+A fast, GTK4/Adwaita widget dashboard for Linux desktops. Built for Hyprland but works on any Wayland compositor.
 
-    # The full path to your media controller python script
-    APP_SCRIPT="path/to/dashboard.py"
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
-    # Check if the Media Controller window is open
-    if hyprctl clients -j | jq -e '.[] | select(.title=="Media Controller")' > /dev/null 2>&1; then
-        # If the window exists, close it by title
-        hyprctl dispatch closewindow "title:^Media Controller$"
-    else
-        # If not running, launch it
-        cd "path/to/dashboard" && python3 "$APP_SCRIPT" &
-    fi
-    ```
-    Make it executable:
-    ```bash
-    chmod +x /path/to/your/script.sh
-    ```
-    Then link it to a keybind in your hyprland config (Ex - super + slash):
-    ```bash
-    bind = super, slash, exec, /path/to/your/script.sh
-    ```
+## Features
 
-Current Features:
-- Dunst notification logging
-- Media controls
-- Wifi Controls
-- Bluetooth Controls
-- Weather Widget
+| Widget | Description |
+|--------|-------------|
+| **Media** | Control any media player (Spotify, Firefox, VLC, etc.) with album art, seek bar, and player switching |
+| **Notifications** | Browse notification history with search, expandable details, and clear functionality |
+| **Clipboard** | Clipboard history manager |
+| **Bluetooth** | Scan, pair, connect devices with battery level monitoring |
+| **WiFi** | Network manager for WiFi and Ethernet connections |
+| **Weather** | Current conditions + 24-hour and 7-day forecasts via Open-Meteo |
 
-Todo:
-- Improve animations and overall UX
-- Add the option to choose which widgets to display
-- System monitoring widget (CPU, RAM, etc.)
-- Session management widget (logout, switch user, etc.)
+---
 
-File Structure & Explanations
-=============================
+## How It Works
 
-## Core Files
+The dashboard is designed to be **instant**. Instead of launching a new Python process every time you want to check something, the app stays running in the background and you toggle its visibility with a keybind.
 
-### `dashboard.py` - Main Application
-The central hub of the application that manages the overall window and widget switching.
+### The Load + Toggle System
 
-**Key Components:**
-- **Dashboard Class**: Main window that holds the sidebar and content area
-- **Sidebar Navigation**: Circular buttons for each widget (media, notifications, etc.)
-- **Content Stack**: GTK Stack that switches between different widget views
-- **Widget Lifecycle Management**: Only activates the currently visible widget to save resources
-- **CSS Styling**: Comprehensive theming with glassmorphism effects, animations, and responsive design
-- **Escape Key Handler**: Quick exit functionality
+This is the **recommended way** to use the dashboard:
 
-**Resource Optimization:**
-- Widgets are created with a 50ms delay to prevent UI blocking on startup
-- Only the active widget runs background processes (activate/deactivate pattern)
-- Smooth transitions between views with 300ms slide animations
+1. **`--load`** - Starts the app in the background without showing the window. All widgets are pre-loaded and ready.
+2. **`--toggle`** - Shows the window if hidden, hides it if visible. Instant response, no startup delay.
 
-### `dunst_log.py` - Notification Logger
-A sophisticated background service that monitors and logs all system notifications.
+When you hide the window, the active widget is deactivated (stops polling, network requests, etc.) to save resources. When you show it again, everything reactivates immediately.
 
-**Core Functionality:**
-- **D-Bus Monitor**: Listens to `org.freedesktop.Notifications` interface
-- **Real-time Parsing**: Processes notification data as it arrives
-- **Image Extraction**: Extracts embedded images from notification data
-- **Color Format Detection**: Automatically detects and corrects image color formats (RGB/BGR/RGBA/BGRA)
-- **JSON Logging**: Stores notifications in structured format with metadata
-- **File Rotation**: Automatically trims old notifications to prevent unlimited growth
+### Command Line Options
 
-**Image Processing Features:**
-- Handles rowstride padding in image data
-- Converts various color formats to standard PNG
-- Debug mode saves images in all formats for troubleshooting
-- Supports both embedded images and file path icons
-
-**Usage:**
 ```bash
-./dunst_log.py --debug    # Enable debug logging
-./dunst_log.py --save-all-formats    # Save images in all color formats
+python dashboard.py                    # Normal launch - shows window
+python dashboard.py --load             # Start hidden in background (use this on login)
+python dashboard.py --toggle           # Toggle visibility (bind this to a key)
+python dashboard.py --view bluetooth   # Open directly to a specific widget
+python dashboard.py --quit             # Kill the background process completely
 ```
 
-## Widget Files
+### Why This Design?
 
-### `media_player.py` - Media Control Widget
-Advanced media player controller using `playerctl` for system-wide media control.
+- **No startup lag** - The window appears instantly because Python is already running
+- **Resource efficient** - Hidden widgets don't poll or make network requests
+- **Single instance** - Only one process runs, subsequent calls just toggle visibility
+- **Preserves state** - Your current widget and scroll position stay where you left them
 
-**Key Features:**
-- **Multi-Player Support**: Automatically detects and switches between media players
-- **Circular Progress Bar**: Custom-drawn seek bar with click-to-seek functionality
-- **Album Art Display**: Circular image widget with URL/file loading capabilities
-- **Player Memory**: Remembers last used player between sessions
-- **Background Commands**: Non-blocking command execution to prevent UI freezes
+---
 
-**Custom Widgets:**
-- `CircularProgressWidget`: Interactive progress ring with Cairo drawing
-- `CircularImage`: Cropped circular album art display
-- `PlayerIconButton`: Smart icon detection for different media players
+## Installation
 
-**Supported Players**: Spotify, VLC, Firefox, Chrome, Rhythmbox, and more
+### Dependencies
 
-### `notifications.py` - Notification History Widget
-Displays and manages notification history with search and interaction capabilities.
+```bash
+# Arch Linux
+sudo pacman -S gtk4 libadwaita python-gobject python-pillow python-numpy python-requests playerctl dunst networkmanager bluez glxinfo
 
-**Features:**
-- **Live Updates**: Real-time monitoring of notification log file
-- **Expandable Rows**: Click to expand/collapse notification details
-- **Search Functionality**: Filter notifications by app name, summary, or body
-- **Smart Icons**: Loads notification icons or shows app initial as fallback
-- **Time Formatting**: Human-readable timestamps (now, 5m ago, yesterday, etc.)
-- **Clear History**: Complete notification and image cache cleanup
-
-**Performance Optimizations:**
-- File monitoring with change detection
-- Icons loaded as rows are created
-- Efficient list filtering
-
-### `wifi.py` - Network Management Widget
-Comprehensive WiFi and Ethernet connection manager using NetworkManager.
-
-**WiFi Features:**
-- **Network Scanning**: Automatic and manual network discovery
-- **Signal Strength**: Visual indicators and percentage display
-- **Security Detection**: Shows network encryption status
-- **Password Dialog**: Secure connection to protected networks
-- **Connection Management**: Connect/disconnect with status feedback
-
-**Ethernet Features:**
-- **Wired Connections**: Manage Ethernet/LAN connections
-- **Device Detection**: Automatic network device discovery
-- **Connection Profiles**: Manage saved network configurations
-
-**Background Processing:**
-- Command queue system prevents UI blocking
-- Periodic network status updates
-- Connection state monitoring
-
-### `bluetooth.py` - Bluetooth Device Manager
-Full-featured Bluetooth device management with advanced battery monitoring.
-
-**Device Management:**
-- **Device Discovery**: Scan for nearby devices and connect to paired ones
-- **Smart Icons**: Automatic device type detection (headphones, mouse, keyboard, etc.)
-- **Connection Control**: Easy connect/disconnect with visual feedback
-- **Device Classification**: Automatic categorization based on device properties
-
-**Battery Monitoring:**
-- Multiple detection methods for maximum compatibility
-- Support for various battery reporting standards
-- Real-time battery level updates for connected devices
-
-**Advanced Features:**
-- Device type detection via Bluetooth class codes
-- Background scanning and connection management
-- Functional error handling and basic logging
-
-**Device Management:**
-- **Multi-Device Support**: Handle multiple connected Android devices
-- **Device Information**: Model, Android version, battery level display
-- **Visual Selection**: Circular device buttons for easy switching
-
-**Quick Actions Grid:**
-- Lock/Wake Screen
-- Home/Back/Recent Apps navigation
-- Device reboot functionality
-- Extensible action system
-
-**Safety Features:**
-- Background command execution
-- Device state monitoring
-- Standard error handling
-
-### `weather.py` - Weather Information Widget
-Beautiful weather display with current conditions and forecasts.
-
-**Data Sources:**
-- **Open-Meteo API**: Free weather data service
-- **Reverse Geocoding**: Automatic location name resolution
-- **Configuration**: Latitude/longitude from `.env` file
-
-**Display Features:**
-- **Current Weather**: Temperature, conditions, feels-like, humidity, wind
-- **24-Hour Forecast**: Scrollable hourly predictions with precipitation
-- **7-Day Forecast**: Daily high/low temperatures and conditions
-- **Weather Icons**: Symbolic icons matching system theme
-
-**Performance:**
-- Data fetching scheduled on the main GTK thread
-- Periodic updates (10-minute intervals)
-
-## Configuration Files
-
-### `.env` - Environment Configuration
-Simple configuration file for location-based services (Example):
+# Other distros - install equivalents for:
+# GTK4, libadwaita, PyGObject, Pillow, NumPy, requests, playerctl, dunst, NetworkManager, BlueZ
 ```
+
+### Clone & Setup
+
+```bash
+git clone https://github.com/gaurishmehra/dashboard.git
+cd dashboard
+chmod +x dunst_log.py
+```
+
+### Weather Configuration
+
+Create a `.env` file with your coordinates for the weather widget:
+
+```env
 LATITUDE=40.7128
 LONGITUDE=-74.0060
 ```
 
-## Dependencies & Requirements
+---
 
-**System Requirements:**
-- GTK 4.0+ and Adwaita library
-- Python 3.8+
-- NetworkManager (for WiFi/Ethernet)
-- Bluetooth stack (bluez)
-- playerctl (for media control)
-- dunst (notification daemon)
+## Hyprland Setup (Recommended)
 
-**Python Packages:**
-- PyGObject (GTK bindings)
-- Pillow (image processing)
-- numpy (numerical operations)
-- requests (HTTP requests)
+This is the optimal setup for instant access to your dashboard.
 
-## Architecture & Design Patterns
+### 1. Add Window Rules
 
-### Widget Lifecycle Pattern
-Each widget implements `activate()`/`deactivate()` methods:
-- **Activate**: Start background processes, timers, and monitoring
-- **Deactivate**: Stop all background activity to save resources
+Add these to your `hyprland.conf`:
 
-### Command Queue Pattern
-Background command execution prevents UI freezing:
-- Commands queued from UI thread
-- Executed in dedicated worker thread
-- Results processed on main thread when needed
+```bash
+# Dashboard window rules
+windowrulev2 = float, class:^(one.gaurish.Dashboard)$
+windowrulev2 = size 800 600, class:^(one.gaurish.Dashboard)$
+windowrulev2 = center, class:^(one.gaurish.Dashboard)$
+windowrulev2 = pin, class:^(one.gaurish.Dashboard)$
+```
 
-### Resource Management
-- File monitoring with automatic cleanup
-- Image caching with size limits
-- Periodic data updates only when widget is visible
-- Memory-efficient list operations
+### 2. Start Services on Login
 
-This modular architecture ensures each component can operate independently while maintaining consistent UI patterns and resource efficiency throughout the application.
+Add these to your `hyprland.conf`:
+
+```bash
+# Start notification logger (required for notification widget)
+exec-once = /path/to/dashboard/dunst_log.py
+
+# Pre-load dashboard in background (makes toggle instant)
+exec-once = python /path/to/dashboard/dashboard.py --load
+```
+
+### 3. Bind Toggle to a Key
+
+```bash
+# Toggle dashboard with Super + D (or any key you prefer)
+bind = SUPER, D, exec, python /path/to/dashboard/dashboard.py --toggle
+```
+
+That's it! Press `Super + D` and your dashboard appears instantly. Press it again to hide. Press `Escape` while focused to hide as well.
+
+---
+
+## How the Notification Logger Works
+
+The `dunst_log.py` script runs in the background and captures all notifications from dunst via D-Bus.
+
+### What It Does
+
+- Monitors `org.freedesktop.Notifications` D-Bus interface
+- Extracts notification data: app name, title, body, icon/image
+- Handles embedded images (album art, screenshots, etc.) and converts them to PNG
+- Stores everything in `~/.local/share/dunst/notifications.json`
+- Auto-rotates old entries (keeps last 5000 by default)
+
+### Running the Logger
+
+```bash
+# Make sure dunst is your notification daemon (not mako, swaync, etc.)
+dunst &
+
+# Start the logger
+./dunst_log.py &
+
+# Or with debug output
+./dunst_log.py --debug
+```
+
+The notification widget in the dashboard reads from this log file and displays your notification history with search, timestamps, and the ability to clear everything.
+
+---
+
+## Architecture
+
+### Lazy Loading
+
+Widgets are imported in parallel background threads at startup. The initial widget loads first, others load while you're already using the app. This means:
+- Window appears in ~100ms
+- All widgets ready within ~500ms
+- No blocking the UI thread
+
+### Widget Lifecycle
+
+Each widget has `activate()` and `deactivate()` methods:
+
+- **activate()** - Called when widget becomes visible. Starts timers, network requests, file monitoring.
+- **deactivate()** - Called when switching away or hiding window. Stops all background activity.
+
+This means only the visible widget uses CPU/network at any time.
+
+### GPU Detection
+
+The app auto-detects your GPU and picks the optimal GTK renderer:
+- **NVIDIA** → OpenGL renderer (hardware accelerated)
+- **Intel/AMD** → Cairo renderer (avoids driver overhead)
+
+Result is cached in `~/.cache/dashboard_gpu_renderer` so detection only runs once.
+
+---
+
+## Troubleshooting
+
+### Dashboard won't start
+```bash
+# Check for missing dependencies
+python -c "import gi; gi.require_version('Gtk', '4.0'); gi.require_version('Adw', '1')"
+```
+
+### Notifications not showing
+```bash
+# Make sure dunst is running and dunst_log.py is active
+pgrep dunst
+pgrep -f dunst_log.py
+
+# Check the log file exists
+cat ~/.local/share/dunst/notifications.json
+```
+
+### Bluetooth/WiFi not working
+```bash
+# Make sure services are running
+systemctl status bluetooth
+systemctl status NetworkManager
+```
+
+### Toggle not working
+```bash
+# Kill any stuck instances and restart
+pkill -f dashboard.py
+python dashboard.py --load
+```
+
+---
+
+## License
+
+MIT

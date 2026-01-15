@@ -5,7 +5,6 @@ from gi.repository import Gtk, Adw, GLib, Pango, Gdk
 import subprocess
 import re
 import threading
-import queue
 import sys
 import warnings
 import json
@@ -295,7 +294,6 @@ class WiFiWidget(Gtk.Box):
         self.available_networks = []
         self.wifi_enabled = False
         self.network_widgets = {}
-        self.command_queue = queue.Queue()
         self.is_active = False
         self.update_timer_id = None
         self.scan_timer_id = None
@@ -310,12 +308,11 @@ class WiFiWidget(Gtk.Box):
         self.ethernet_data_loaded = False
         self._has_cached_data = False  # Track if we have any cached data to show
         self._is_loading = False  # Track if we're currently loading
+        self._cache_dirty = False  # Track if cache needs saving
+        self._pending_action = False  # Track if connect/disconnect is in progress
 
         # Load cache from file on startup
         self.load_cache_from_file()
-
-        self.command_thread = threading.Thread(target=self.command_worker, daemon=True)
-        self.command_thread.start()
         self.create_ui()
     
     def load_cache_from_file(self):
@@ -337,7 +334,13 @@ class WiFiWidget(Gtk.Box):
             self._has_cached_data = False
     
     def save_cache_to_file(self):
-        """Save current network data to cache file"""
+        """Save current network data to cache file (debounced)"""
+        self._cache_dirty = True
+    
+    def _do_save_cache(self):
+        """Actually write cache to file"""
+        if not self._cache_dirty:
+            return
         try:
             cache_data = {
                 'connected_network': self.connected_network,
@@ -347,8 +350,8 @@ class WiFiWidget(Gtk.Box):
                 'available_ethernet': self.available_ethernet
             }
             with open(self.CACHE_FILE, 'w') as f:
-                json.dump(cache_data, f, indent=2)
-            print("WiFi cache saved to file")
+                json.dump(cache_data, f)
+            self._cache_dirty = False
         except IOError as e:
             print(f"Error saving WiFi cache: {e}")
 
@@ -381,6 +384,8 @@ class WiFiWidget(Gtk.Box):
         print("WiFiWidget Deactivated")
         if self.update_timer_id: GLib.source_remove(self.update_timer_id); self.update_timer_id = None
         if self.scan_timer_id: GLib.source_remove(self.scan_timer_id); self.scan_timer_id = None
+        # Save cache on deactivate
+        self._do_save_cache()
 
     # Updates both WiFi and Ethernet connections periodically.
     def update_all_connections(self):
@@ -388,122 +393,140 @@ class WiFiWidget(Gtk.Box):
         self.fetch_all_data(show_spinner=False)  # No spinner on periodic updates
         return True
 
-    # Fetch all data in background threads like the weather widget
+    # Fetch all data in a single background thread
     def fetch_all_data(self, show_spinner=False):
+        # Skip if a connect/disconnect action is pending
+        if self._pending_action:
+            return
+        
         # Prevent multiple simultaneous fetches
         if self._is_loading:
             return
         
         self._is_loading = True
-        self.wifi_data_loaded = False
-        self.ethernet_data_loaded = False
         
-        # Show spinning scan button (called from main thread, no need for idle_add)
-        self.set_scan_button_loading(True)
+        # Show spinning scan button
+        GLib.idle_add(lambda: self.set_scan_button_loading(True))
         
         # Only show loading spinner on first load (no cached data)
         if show_spinner and not self._has_cached_data:
-            self.show_loading()
+            GLib.idle_add(self.show_loading)
         
-        thread_wifi = threading.Thread(target=self.fetch_wifi_in_thread, daemon=True)
-        thread_ethernet = threading.Thread(target=self.fetch_ethernet_in_thread, daemon=True)
-        thread_wifi.start()
-        thread_ethernet.start()
-
-    def fetch_wifi_in_thread(self):
+        def fetch_all():
+            try:
+                self.fetch_all_status()
+            except Exception as e:
+                print(f"Error fetching data: {e}")
+            finally:
+                GLib.idle_add(self._on_fetch_complete)
+        
+        threading.Thread(target=fetch_all, daemon=True).start()
+    
+    def fetch_all_status(self):
+        """Fetch all WiFi and Ethernet status in one go - runs in background thread"""
         try:
-            self.update_wifi_status_threaded()
-        except Exception as e:
-            print(f"Error fetching WiFi data: {e}")
-        finally:
-            GLib.idle_add(self.on_wifi_data_fetched)
-
-    def fetch_ethernet_in_thread(self):
-        try:
-            self.update_ethernet_status_threaded()
-        except Exception as e:
-            print(f"Error fetching Ethernet data: {e}")
-        finally:
-            GLib.idle_add(self.on_ethernet_data_fetched)
-
-    def on_wifi_data_fetched(self):
-        self.wifi_data_loaded = True
-        self.check_data_loaded()
-
-    def on_ethernet_data_fetched(self):
-        self.ethernet_data_loaded = True
-        self.check_data_loaded()
-
-    def check_data_loaded(self):
-        if self.wifi_data_loaded and self.ethernet_data_loaded:
-            self._has_cached_data = True  # Mark that we have cached data now
-            self._is_loading = False  # Mark loading as complete
-            self.set_scan_button_loading(False)  # Stop spinning
-            self.save_cache_to_file()  # Save cache to file
-            self.update_ui_after_data_fetch()
-
-    def update_wifi_status_threaded(self):
-        """WiFi status update that runs in background thread"""
-        try:
-            radio_output = self.run_wifi_command("nmcli radio wifi")
-            self.wifi_enabled = radio_output.strip() == "enabled"
+            # Get radio status
+            radio_output = subprocess.run("nmcli radio wifi", shell=True, capture_output=True, text=True, timeout=3).stdout.strip()
+            self.wifi_enabled = radio_output == "enabled"
             
-            if self.wifi_enabled:
-                self.update_networks_threaded()
-        except Exception as e:
-            print(f"Error updating WiFi status: {e}")
-
-    def update_ethernet_status_threaded(self):
-        """Ethernet status update that runs in background thread"""
-        try:
-            # Get active Ethernet connections
-            active_conn = self.run_wifi_command("nmcli -t -f NAME,TYPE,DEVICE c show --active")
-            current_ethernet = None
-            for line in active_conn.split('\n'):
-                if ':802-3-ethernet:' in line:
-                    parts = line.split(':')
-                    if len(parts) >= 3:
-                        current_ethernet = {'name': parts[0], 'device': parts[2]}
-                        break
+            # Get active connections (both wifi and ethernet)
+            active_output = subprocess.run("nmcli -t -f NAME,TYPE,DEVICE c show --active", shell=True, capture_output=True, text=True, timeout=3).stdout.strip()
             
-            self.connected_ethernet = current_ethernet
-            
-            # Get all Ethernet connections
-            all_conns_output = self.run_wifi_command("nmcli -t -f NAME,TYPE c show")
-            self.available_ethernet = []
-            for line in all_conns_output.split('\n'):
-                if ':802-3-ethernet' in line:
-                    conn_name = line.split(':')[0]
-                    if not current_ethernet or conn_name != current_ethernet['name']:
-                        # Get available Ethernet devices
-                        devices_output = self.run_wifi_command("nmcli -t -f DEVICE,TYPE,STATE device status")
-                        device_name = "Unknown device"
-                        for device_line in devices_output.split('\n'):
-                            if ':ethernet:' in device_line:
-                                device_name = device_line.split(':')[0]
-                                break
-                        self.available_ethernet.append({'name': conn_name, 'device': device_name})
-        except Exception as e:
-            print(f"Error updating Ethernet status: {e}")
-
-    def update_networks_threaded(self):
-        """Network scanning that runs in background thread"""
-        try:
-            active_conn = self.run_wifi_command("nmcli -t -f NAME,TYPE,DEVICE c show --active")
-            current_name = next((line.split(':')[0] for line in active_conn.split('\n') if ':802-11-wireless:' in line), None)
-            
+            # Parse active connections
             self.connected_network = None
-            if current_name:
-                signal_out = self.run_wifi_command(f"nmcli -t -f SSID,SIGNAL dev wifi | grep '^{re.escape(current_name)}:' | cut -d: -f2 | head -n1")
-                self.connected_network = {'ssid': current_name, 'signal': int(signal_out) if signal_out.isdigit() else 50, 'security': 'Connected'}
-
-            all_nets_out = self.run_wifi_command("nmcli -f SSID,SIGNAL,SECURITY dev wifi")
-            self.available_networks = self.parse_networks_output(all_nets_out)
+            self.connected_ethernet = None
+            for line in active_output.split('\n'):
+                if not line.strip():
+                    continue
+                # Use rsplit to handle colons in connection names
+                if ':802-11-wireless:' in line:
+                    # Format: NAME:TYPE:DEVICE - split from right to handle colons in NAME
+                    idx = line.find(':802-11-wireless:')
+                    if idx > 0:
+                        ssid = line[:idx]
+                        self.connected_network = {'ssid': ssid, 'signal': 80, 'security': 'Connected'}
+                elif ':802-3-ethernet:' in line:
+                    idx = line.find(':802-3-ethernet:')
+                    if idx > 0:
+                        name = line[:idx]
+                        device = line.split(':')[-1] if ':' in line else 'eth0'
+                        self.connected_ethernet = {'name': name, 'device': device}
             
-            if self.connected_network:
-                self.available_networks = [n for n in self.available_networks if n['ssid'] != self.connected_network['ssid']]
+            # Get WiFi networks if enabled
+            if self.wifi_enabled:
+                # Use human-readable format which is easier to parse
+                nets_output = subprocess.run("nmcli -t -f SSID,SIGNAL,SECURITY dev wifi list", shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
+                self.available_networks = []
+                seen = set()
+                connected_ssid = self.connected_network['ssid'] if self.connected_network else None
+                for line in nets_output.split('\n'):
+                    if not line.strip():
+                        continue
+                    # nmcli -t uses : as separator, but SECURITY can have multiple values
+                    # Format: SSID:SIGNAL:SECURITY (SECURITY may contain spaces but not colons usually)
+                    # Split into max 3 parts from the right for signal and security
+                    parts = line.split(':')
+                    if len(parts) >= 2:
+                        # SSID might contain colons, so join all but last 2 parts
+                        if len(parts) > 3:
+                            ssid = ':'.join(parts[:-2])
+                            signal_str = parts[-2]
+                            security = parts[-1]
+                        elif len(parts) == 3:
+                            ssid = parts[0]
+                            signal_str = parts[1]
+                            security = parts[2]
+                        else:
+                            ssid = parts[0]
+                            signal_str = parts[1] if len(parts) > 1 else '0'
+                            security = ''
+                        
+                        if not ssid or ssid in seen:
+                            continue
+                        
+                        try:
+                            signal = int(signal_str)
+                        except:
+                            signal = 0
+                        
+                        if ssid == connected_ssid:
+                            # Update connected network signal
+                            if self.connected_network:
+                                self.connected_network['signal'] = signal
+                        else:
+                            seen.add(ssid)
+                            self.available_networks.append({
+                                'ssid': ssid, 
+                                'signal': signal, 
+                                'security': security if security else 'Open'
+                            })
+                self.available_networks.sort(key=lambda x: x['signal'], reverse=True)
+            
+            # Get available ethernet connections
+            eth_output = subprocess.run("nmcli -t -f NAME,TYPE c show", shell=True, capture_output=True, text=True, timeout=3).stdout.strip()
+            self.available_ethernet = []
+            connected_eth_name = self.connected_ethernet['name'] if self.connected_ethernet else None
+            for line in eth_output.split('\n'):
+                if not line.strip():
+                    continue
+                if ':802-3-ethernet' in line:
+                    idx = line.find(':802-3-ethernet')
+                    conn_name = line[:idx] if idx > 0 else line.split(':')[0]
+                    if conn_name and conn_name != connected_eth_name:
+                        self.available_ethernet.append({'name': conn_name, 'device': 'ethernet'})
+            
+            self._has_cached_data = True
+            self.save_cache_to_file()
         except Exception as e:
-            print(f"Error updating networks: {e}")
+            print(f"Error in fetch_all_status: {e}")
+    
+    def _on_fetch_complete(self):
+        """Called on main thread when fetch completes"""
+        self._is_loading = False
+        self.wifi_data_loaded = True
+        self.ethernet_data_loaded = True
+        self.set_scan_button_loading(False)
+        self.update_ui_after_data_fetch()
 
     def update_ui_after_data_fetch(self):
         """Update UI after all data has been fetched"""
@@ -566,27 +589,6 @@ class WiFiWidget(Gtk.Box):
         except Exception as e:
             print(f"Error showing error state: {e}")
 
-    # This function runs in a separate thread, executing commands from a queue.
-    # This prevents the main application from freezing while waiting for commands to finish.
-    def command_worker(self):
-        while True:
-            try:
-                command = self.command_queue.get()
-                print(f"Executing: {command}")
-                # Convert string command to list for better performance (no shell overhead)
-                if isinstance(command, str):
-                    cmd_list = command.split()
-                else:
-                    cmd_list = command
-                result = subprocess.run(cmd_list, capture_output=True, text=True, timeout=25)
-                if result.returncode != 0:
-                    print(f"Error: {result.stderr.strip()}")
-                else:
-                    print(f"Success: {result.stdout.strip()}")
-                self.command_queue.task_done()
-            except Exception as e:
-                print(f"Command worker exception: {e}")
-
     # Constructs the main user interface for the WiFi widget, including the header,
     # on/off switch, and the area where networks will be listed.
     def create_ui(self):
@@ -621,14 +623,10 @@ class WiFiWidget(Gtk.Box):
             self.scan_button.set_sensitive(True)
 
     # A simple helper to run a command and return its output.
-    def run_wifi_command(self, command):
+    def run_wifi_command(self, command, timeout=15):
         try:
-            # Convert string command to list for better performance (no shell overhead)
-            if isinstance(command, str):
-                cmd_list = command.split()
-            else:
-                cmd_list = command
-            result = subprocess.run(cmd_list, capture_output=True, text=True, timeout=5)
+            # Use shell=True for commands with pipes, quotes, and special characters
+            result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=timeout)
             return result.stdout.strip() if result.returncode == 0 else ""
         except Exception as e:
             return ""
@@ -661,18 +659,20 @@ class WiFiWidget(Gtk.Box):
     # Sends a command to tell the system to scan for WiFi networks.
     def scan_networks(self):
         if self.wifi_enabled:
-            # Start spinner immediately when button is clicked
             self.set_scan_button_loading(True)
-            self.command_queue.put("nmcli dev wifi rescan")
-            # Refresh data after scan - show spinner only if no cached data
-            GLib.timeout_add_seconds(2, lambda: self.fetch_all_data(show_spinner=not self._has_cached_data) or False)
+            def do_scan():
+                self.run_wifi_command("nmcli dev wifi rescan")
+                GLib.idle_add(lambda: self.fetch_all_data(show_spinner=False) or False)
+            threading.Thread(target=do_scan, daemon=True).start()
         return True
 
     # This function is called when the user clicks the main WiFi on/off switch.
     def on_wifi_toggled(self, switch, *args):
-        self.command_queue.put(f"nmcli radio wifi {'on' if switch.get_active() else 'off'}")
-        # Refresh data after toggle (no spinner, just update)
-        GLib.timeout_add_seconds(2, lambda: self.fetch_all_data(show_spinner=False) or False)
+        cmd = f"nmcli radio wifi {'on' if switch.get_active() else 'off'}"
+        def do_toggle():
+            self.run_wifi_command(cmd)
+            GLib.timeout_add(500, lambda: self.fetch_all_data(show_spinner=False) or False)
+        threading.Thread(target=do_toggle, daemon=True).start()
 
     # Checks if a saved connection profile already exists for a given network SSID.
     def does_connection_exist(self, ssid):
@@ -687,35 +687,94 @@ class WiFiWidget(Gtk.Box):
         ssid = network_info['ssid']
         widget = self.network_widgets.get(ssid)
         if widget: widget.set_loading(True)
+        
+        # Set pending flag to prevent background refresh from interfering
+        self._pending_action = True
 
         if connect:
             is_open = network_info.get('security', '') in ['Open', '--', '']
             if is_open:
-                self.command_queue.put(f"nmcli dev wifi connect '{ssid}'")
+                cmd = f"nmcli dev wifi connect '{ssid}'"
             elif self.does_connection_exist(ssid):
                 print(f"Connecting to saved network: {ssid}")
-                self.command_queue.put(f"nmcli c up '{ssid}'")
+                cmd = f"nmcli c up '{ssid}'"
             else:
                 if widget: widget.set_loading(False)
+                self._pending_action = False
                 self.show_password_dialog(ssid)
                 return
+            
+            # Optimistic UI update - show as connected immediately
+            self.connected_network = {'ssid': ssid, 'signal': network_info.get('signal', 80), 'security': 'Connected'}
+            self.available_networks = [n for n in self.available_networks if n['ssid'] != ssid]
         else:
-            self.command_queue.put(f"nmcli c down '{ssid}'")
+            cmd = f"nmcli c down '{ssid}'"
+            # Optimistic UI update - show as disconnected immediately
+            if self.connected_network and self.connected_network.get('ssid') == ssid:
+                # Move to available networks with original security type
+                orig_security = network_info.get('security', 'WPA2')
+                if orig_security == 'Connected':
+                    orig_security = 'WPA2'  # Default for previously connected
+                self.available_networks.insert(0, {
+                    'ssid': ssid, 
+                    'signal': network_info.get('signal', 80), 
+                    'security': orig_security
+                })
+                self.connected_network = None
+        
+        # Update UI immediately
+        self.update_ui()
 
-        GLib.timeout_add_seconds(5, lambda: self.fetch_all_data(show_spinner=False) or False)
+        def do_action():
+            try:
+                subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+            except Exception as e:
+                print(f"WiFi command error: {e}")
+            finally:
+                # Always refresh after command completes
+                def finish():
+                    self._pending_action = False
+                    self.fetch_all_data(show_spinner=False)
+                    return False
+                GLib.timeout_add(300, finish)  # Small delay for nmcli to settle
+        threading.Thread(target=do_action, daemon=True).start()
 
     # This is triggered when a user clicks the "Connect" or "Disconnect" button for an Ethernet connection.
     def on_ethernet_connect(self, connection_info, connect=True):
         conn_name = connection_info['name']
         widget = self.ethernet_widgets.get(conn_name)
         if widget: widget.set_loading(True)
+        
+        # Set pending flag
+        self._pending_action = True
 
         if connect:
-            self.command_queue.put(f"nmcli c up '{conn_name}'")
+            # Optimistic UI update
+            self.connected_ethernet = connection_info
+            self.available_ethernet = [e for e in self.available_ethernet if e['name'] != conn_name]
         else:
-            self.command_queue.put(f"nmcli c down '{conn_name}'")
+            # Optimistic UI update
+            if self.connected_ethernet and self.connected_ethernet.get('name') == conn_name:
+                self.available_ethernet.insert(0, connection_info)
+                self.connected_ethernet = None
+        
+        # Update UI immediately
+        self.update_ui()
 
-        GLib.timeout_add_seconds(3, lambda: self.fetch_all_data(show_spinner=False) or False)
+        cmd = f"nmcli c up '{conn_name}'" if connect else f"nmcli c down '{conn_name}'"
+        
+        def do_action():
+            try:
+                subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+            except Exception as e:
+                print(f"Ethernet command error: {e}")
+            finally:
+                def finish():
+                    self._pending_action = False
+                    self.fetch_all_data(show_spinner=False)
+                    return False
+                GLib.timeout_add(300, finish)
+        threading.Thread(target=do_action, daemon=True).start()
 
     # Creates and displays the password dialog for a specific network.
     def show_password_dialog(self, ssid):
@@ -728,11 +787,34 @@ class WiFiWidget(Gtk.Box):
         if response == "connect":
             password = dialog.get_password()
             if password:
+                # Set pending flag
+                self._pending_action = True
+                
+                # Find network info for optimistic update
+                network_info = next((n for n in self.available_networks if n['ssid'] == ssid), None)
+                
                 widget = self.network_widgets.get(ssid)
                 if widget: widget.set_loading(True)
+                
+                # Optimistic UI update
+                if network_info:
+                    self.connected_network = {'ssid': ssid, 'signal': network_info.get('signal', 80), 'security': 'Connected'}
+                    self.available_networks = [n for n in self.available_networks if n['ssid'] != ssid]
+                    self.update_ui()
+                
                 connect_cmd = self.get_connect_and_save_command(ssid, password)
-                self.command_queue.put(connect_cmd)
-                GLib.timeout_add_seconds(8, lambda: self.fetch_all_data(show_spinner=False) or False)
+                def do_connect():
+                    try:
+                        subprocess.run(connect_cmd, shell=True, capture_output=True, text=True, timeout=15)
+                    except Exception as e:
+                        print(f"WiFi connect error: {e}")
+                    finally:
+                        def finish():
+                            self._pending_action = False
+                            self.fetch_all_data(show_spinner=False)
+                            return False
+                        GLib.timeout_add(300, finish)
+                threading.Thread(target=do_connect, daemon=True).start()
         dialog.destroy()
 
     # Clears and redraws the list of network widgets based on the latest scan data.
