@@ -4,6 +4,19 @@ A fast, GTK4/Adwaita widget dashboard for Linux desktops. Built for Hyprland but
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
+> **Note:** Sorry, had to redact some stuff for privacy.
+
+## Screenshots
+
+| | |
+|:---:|:---:|
+| ![Media Player](Images/MediaPlayer.png) | ![Notifications](Images/Notifications.png) |
+| **Media Player** | **Notifications** |
+| ![Clipboard History](Images/ClipboardHistory.png) | ![Weather](Images/Weather.png) |
+| **Clipboard History** | **Weather** |
+| ![Bluetooth](Images/Bluetooth.png) | ![Network](Images/Network.png) |
+| **Bluetooth** | **Network** |
+
 ## Features
 
 | Widget | Description |
