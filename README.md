@@ -2,7 +2,7 @@
 
 A fast, GTK4/Adwaita widget dashboard for Linux desktops. Built for Hyprland but works on any Wayland compositor.
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![License](https://img.shields.io/badge/license-see%20LICENSE-blue.svg)
 
 > **Note:** Sorry, had to redact some stuff for privacy.
 
@@ -225,4 +225,4 @@ python dashboard.py --load
 
 ## License
 
-MIT
+See [LICENSE](LICENSE).
