@@ -74,9 +74,9 @@ entry:focus {
 }
 
 .notification-body-scroll {
-    background: rgba(0, 0, 0, 0.1);
-    border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(0, 0, 0, 0.08);
+    border-radius: 6px;
+    border: none;
     margin-top: 4px;
 }
 
@@ -295,6 +295,37 @@ entry:focus {
     font-size: 13px;
     color: rgba(255, 255, 255, 0.85);
     line-height: 1.5;
+}
+
+.expanded-content {
+    padding: 0;
+}
+
+.notification-body-text {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.85);
+    line-height: 1.5;
+    padding: 12px;
+}
+
+.notification-body-frame {
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.notification-image-frame {
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.notification-image {
+    border-radius: 6px;
+}
+
+.notification-actions {
+    margin-top: 12px;
 }
 
 .expand-icon {

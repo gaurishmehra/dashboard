@@ -1,6 +1,7 @@
 import gi
-gi.require_version('Gtk', '4.0')
-gi.require_version('Adw', '1')
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw, GLib, Pango, GdkPixbuf, Gio, Gdk
 import cairo
 import subprocess
@@ -16,15 +17,19 @@ import time
 
 # Lazy import for requests - deferred to first use to speed up module load
 _requests = None
+
+
 def _get_requests():
     global _requests
     if _requests is None:
         try:
             import requests
+
             _requests = requests
         except ImportError:
             _requests = False
     return _requests if _requests else None
+
 
 warnings.filterwarnings("ignore", ".*pixbuf_get_from_surface.*", DeprecationWarning)
 
@@ -34,6 +39,7 @@ IMAGE_CACHE_DIR = os.path.join(CONFIG_DIR, "image_cache")
 
 # Ensure cache directory exists
 os.makedirs(IMAGE_CACHE_DIR, exist_ok=True)
+
 
 # Saves the name of the last used media player to a configuration file.
 # This helps the app remember your preference between sessions.
@@ -47,6 +53,7 @@ def save_last_player(player_name):
     except Exception as e:
         print(f"Error saving last player '{player_name}': {e}")
 
+
 # Loads the name of the last used media player from the configuration file.
 # This is called when the app starts up.
 def load_last_player():
@@ -59,6 +66,7 @@ def load_last_player():
         print(f"Error loading last player: {e}")
     return None
 
+
 # This is a custom GTK widget that draws a circular progress bar.
 # It also acts as a seek bar, allowing users to click on it to jump
 # to a different position in the media.
@@ -68,7 +76,9 @@ class CircularProgressWidget(Gtk.DrawingArea):
         super().__init__()
         self.set_size_request(220, 220)
         self.progress = 0.0
-        self._last_drawn_progress = -1.0  # Track last drawn state to avoid redundant redraws
+        self._last_drawn_progress = (
+            -1.0
+        )  # Track last drawn state to avoid redundant redraws
         self.set_draw_func(self.draw_progress)
 
         gesture_click = Gtk.GestureClick()
@@ -152,6 +162,7 @@ class CircularProgressWidget(Gtk.DrawingArea):
             cr.arc(center_x, center_y, radius, start_angle, end_angle)
             cr.stroke()
 
+
 # A custom GTK widget for displaying an image cropped into a circle,
 # perfect for album art.
 class CircularImage(Gtk.DrawingArea):
@@ -192,30 +203,31 @@ class CircularImage(Gtk.DrawingArea):
             # Create a cache key from the URL
             url_hash = hashlib.md5(url.encode()).hexdigest()[:16]
             cache_path = os.path.join(IMAGE_CACHE_DIR, f"{url_hash}.jpg")
-            
+
             # Check cache first
             if os.path.exists(cache_path):
                 pixbuf = GdkPixbuf.Pixbuf.new_from_file(cache_path)
                 GLib.idle_add(self._set_pixbuf_on_main_thread, pixbuf)
                 return
-            
+
             # Download with timeout - use requests if available, else urllib
             requests = _get_requests()
             if requests:
                 response = requests.get(url, timeout=3, stream=True)
                 response.raise_for_status()
-                with open(cache_path, 'wb') as f:
+                with open(cache_path, "wb") as f:
                     for chunk in response.iter_content(chunk_size=8192):
                         f.write(chunk)
             else:
                 import urllib.request
+
                 urllib.request.urlretrieve(url, cache_path)
-            
+
             pixbuf = GdkPixbuf.Pixbuf.new_from_file(cache_path)
             GLib.idle_add(self._set_pixbuf_on_main_thread, pixbuf)
         except Exception as e:
             # Clean up failed cache file
-            if 'cache_path' in locals() and os.path.exists(cache_path):
+            if "cache_path" in locals() and os.path.exists(cache_path):
                 try:
                     os.unlink(cache_path)
                 except:
@@ -240,13 +252,17 @@ class CircularImage(Gtk.DrawingArea):
         size = self.size
         width, height = original_pixbuf.get_width(), original_pixbuf.get_height()
         min_dim = min(width, height)
-        sub_pixbuf = original_pixbuf.new_subpixbuf((width - min_dim) // 2, (height - min_dim) // 2, min_dim, min_dim)
+        sub_pixbuf = original_pixbuf.new_subpixbuf(
+            (width - min_dim) // 2, (height - min_dim) // 2, min_dim, min_dim
+        )
 
-        scaled_pixbuf = sub_pixbuf.scale_simple(size, size, GdkPixbuf.InterpType.BILINEAR)
+        scaled_pixbuf = sub_pixbuf.scale_simple(
+            size, size, GdkPixbuf.InterpType.BILINEAR
+        )
 
         surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, size, size)
         ctx = cairo.Context(surface)
-        ctx.arc(size/2, size/2, size/2, 0, 2 * math.pi)
+        ctx.arc(size / 2, size / 2, size / 2, 0, 2 * math.pi)
         ctx.clip()
         Gdk.cairo_set_source_pixbuf(ctx, scaled_pixbuf, 0, 0)
         ctx.paint()
@@ -257,7 +273,9 @@ class CircularImage(Gtk.DrawingArea):
     # album art or the default placeholder icon.
     def draw_circular_image(self, area, cr, width, height, user_data=None):
         if self.pixbuf and not self.is_default_icon:
-            Gdk.cairo_set_source_pixbuf(cr, self.pixbuf, (width - self.size) / 2, (height - self.size) / 2)
+            Gdk.cairo_set_source_pixbuf(
+                cr, self.pixbuf, (width - self.size) / 2, (height - self.size) / 2
+            )
             cr.paint()
         else:
             center_x, center_y = width / 2, height / 2
@@ -275,7 +293,7 @@ class CircularImage(Gtk.DrawingArea):
                 icon_size,
                 1,
                 Gtk.TextDirection.NONE,
-                Gtk.IconLookupFlags.FORCE_SYMBOLIC
+                Gtk.IconLookupFlags.FORCE_SYMBOLIC,
             )
 
             if paintable:
@@ -289,6 +307,7 @@ class CircularImage(Gtk.DrawingArea):
                     render_node.draw(cr)
                     cr.restore()
 
+
 # A simple, circular button used to represent a single media player
 # (like Spotify, a browser, etc.).
 class PlayerIconButton(Gtk.Button):
@@ -298,22 +317,32 @@ class PlayerIconButton(Gtk.Button):
         super().__init__()
         self.player_name = player_name
 
-        if 'plasma-browser-integration' in player_name.lower():
+        if "plasma-browser-integration" in player_name.lower():
             display_name = "Browser"
             icon_name = "web-browser-symbolic"
         else:
-            display_name = player_name.split('.')[0].title()
+            display_name = player_name.split(".")[0].title()
             icon_map = {
-                'spotify': 'audio-x-generic-symbolic', 'firefox': 'firefox-symbolic',
-                'chrome': 'web-browser-symbolic', 'chromium': 'web-browser-symbolic',
-                'vlc': 'video-x-generic-symbolic', 'mpv': 'video-x-generic-symbolic',
-                'rhythmbox': 'audio-x-generic-symbolic', 'amarok': 'audio-x-generic-symbolic',
-                'clementine': 'audio-x-generic-symbolic', 'audacious': 'audio-x-generic-symbolic',
-                'deadbeef': 'audio-x-generic-symbolic', 'smplayer': 'video-x-generic-symbolic',
-                'totem': 'video-x-generic-symbolic', 'banshee': 'audio-x-generic-symbolic',
-                'pragha': 'audio-x-generic-symbolic', 'lollypop': 'audio-x-generic-symbolic',
-                'strawberry': 'audio-x-generic-symbolic', 'elisa': 'audio-x-generic-symbolic',
-                'plasma-browser-integration': 'firefox-symbolic', 'kdeconnect': 'phone-symbolic'
+                "spotify": "audio-x-generic-symbolic",
+                "firefox": "firefox-symbolic",
+                "chrome": "web-browser-symbolic",
+                "chromium": "web-browser-symbolic",
+                "vlc": "video-x-generic-symbolic",
+                "mpv": "video-x-generic-symbolic",
+                "rhythmbox": "audio-x-generic-symbolic",
+                "amarok": "audio-x-generic-symbolic",
+                "clementine": "audio-x-generic-symbolic",
+                "audacious": "audio-x-generic-symbolic",
+                "deadbeef": "audio-x-generic-symbolic",
+                "smplayer": "video-x-generic-symbolic",
+                "totem": "video-x-generic-symbolic",
+                "banshee": "audio-x-generic-symbolic",
+                "pragha": "audio-x-generic-symbolic",
+                "lollypop": "audio-x-generic-symbolic",
+                "strawberry": "audio-x-generic-symbolic",
+                "elisa": "audio-x-generic-symbolic",
+                "plasma-browser-integration": "firefox-symbolic",
+                "kdeconnect": "phone-symbolic",
             }
             player_key = display_name.lower()
             icon_name = icon_map.get(player_key, "multimedia-player-symbolic")
@@ -332,6 +361,7 @@ class PlayerIconButton(Gtk.Button):
         else:
             self.remove_css_class("suggested-action")
 
+
 # The main widget that brings everything together. It finds media players,
 # displays their info, and provides playback controls.
 class MediaPlayerWidget(Gtk.Box):
@@ -339,6 +369,8 @@ class MediaPlayerWidget(Gtk.Box):
     # background thread for sending commands.
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=15)
+        self.set_valign(Gtk.Align.CENTER)
+        self.set_vexpand(True)
 
         self.current_player = None
         self.players = []
@@ -374,7 +406,9 @@ class MediaPlayerWidget(Gtk.Box):
                     # Retry up to 3 times for reliability
                     for attempt in range(3):
                         try:
-                            result = subprocess.run(cmd_list, capture_output=True, text=True, timeout=3)
+                            result = subprocess.run(
+                                cmd_list, capture_output=True, text=True, timeout=3
+                            )
                             if result.returncode == 0:
                                 break
                             # Small delay before retry
@@ -415,8 +449,12 @@ class MediaPlayerWidget(Gtk.Box):
         self.set_margin_bottom(20)
         self.set_margin_start(20)
         self.set_margin_end(20)
+        self.set_valign(Gtk.Align.CENTER)
+        self.set_vexpand(True)
 
-        self.players_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, halign=Gtk.Align.CENTER)
+        self.players_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=8, halign=Gtk.Align.CENTER
+        )
 
         art_container = Gtk.Overlay(halign=Gtk.Align.CENTER)
         self.progress_widget = CircularProgressWidget()
@@ -429,10 +467,22 @@ class MediaPlayerWidget(Gtk.Box):
         self.album_art.set_can_target(False)
         art_container.add_overlay(self.album_art)
 
-        track_info_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, halign=Gtk.Align.CENTER)
-        self.title_label = Gtk.Label(label="No Media Playing", ellipsize=Pango.EllipsizeMode.END, max_width_chars=30, halign=Gtk.Align.CENTER)
+        track_info_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=4, halign=Gtk.Align.CENTER
+        )
+        self.title_label = Gtk.Label(
+            label="No Media Playing",
+            ellipsize=Pango.EllipsizeMode.END,
+            max_width_chars=30,
+            halign=Gtk.Align.CENTER,
+        )
         self.title_label.add_css_class("title-label")
-        self.artist_label = Gtk.Label(label="Select a player", ellipsize=Pango.EllipsizeMode.END, max_width_chars=35, halign=Gtk.Align.CENTER)
+        self.artist_label = Gtk.Label(
+            label="Select a player",
+            ellipsize=Pango.EllipsizeMode.END,
+            max_width_chars=35,
+            halign=Gtk.Align.CENTER,
+        )
         self.artist_label.add_css_class("artist-label")
         self.time_label = Gtk.Label(label="--:-- / --:--", halign=Gtk.Align.CENTER)
         self.time_label.add_css_class("time-label")
@@ -440,23 +490,47 @@ class MediaPlayerWidget(Gtk.Box):
         track_info_box.append(self.artist_label)
         track_info_box.append(self.time_label)
 
-        controls_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=15, halign=Gtk.Align.CENTER, margin_top=10)
-        self.prev_button = Gtk.Button(icon_name="media-skip-backward-symbolic", css_classes=["circular", "control-button"], sensitive=False)
+        controls_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=15,
+            halign=Gtk.Align.CENTER,
+            margin_top=10,
+        )
+        self.prev_button = Gtk.Button(
+            icon_name="media-skip-backward-symbolic",
+            css_classes=["circular", "control-button"],
+            sensitive=False,
+        )
         self.prev_button.set_size_request(44, 44)
         self.prev_button.connect("clicked", lambda b: self._queue_command("previous"))
-        self.play_pause_button = Gtk.Button(icon_name="media-playback-start-symbolic", css_classes=["circular", "play-button"], sensitive=False)
+        self.play_pause_button = Gtk.Button(
+            icon_name="media-playback-start-symbolic",
+            css_classes=["circular", "play-button"],
+            sensitive=False,
+        )
         self.play_pause_button.set_size_request(56, 56)
         self.play_pause_button.connect("clicked", self.on_play_pause_clicked)
-        self.next_button = Gtk.Button(icon_name="media-skip-forward-symbolic", css_classes=["circular", "control-button"], sensitive=False)
+        self.next_button = Gtk.Button(
+            icon_name="media-skip-forward-symbolic",
+            css_classes=["circular", "control-button"],
+            sensitive=False,
+        )
         self.next_button.set_size_request(44, 44)
         self.next_button.connect("clicked", lambda b: self._queue_command("next"))
         controls_box.append(self.prev_button)
         controls_box.append(self.play_pause_button)
         controls_box.append(self.next_button)
 
-        volume_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10, halign=Gtk.Align.CENTER, margin_top=10)
+        volume_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=10,
+            halign=Gtk.Align.CENTER,
+            margin_top=10,
+        )
 
-        self.volume_scale = Gtk.Scale(draw_value=False, sensitive=False, css_classes=["volume-scale"])
+        self.volume_scale = Gtk.Scale(
+            draw_value=False, sensitive=False, css_classes=["volume-scale"]
+        )
         self.volume_scale.set_range(0, 1)
         self.volume_scale.set_value(0.5)
 
@@ -480,7 +554,13 @@ class MediaPlayerWidget(Gtk.Box):
                 cmd_list = shlex.split(cmd)
             else:
                 cmd_list = cmd
-            result = subprocess.run(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=0.3)
+            result = subprocess.run(
+                cmd_list,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=0.3,
+            )
             return result.stdout.strip() if result.returncode == 0 else None
         except subprocess.TimeoutExpired:
             return None
@@ -499,13 +579,18 @@ class MediaPlayerWidget(Gtk.Box):
     # icon for responsiveness and then queues the actual command.
     def on_play_pause_clicked(self, button):
         is_currently_playing = "media-playback-pause-symbolic" in button.get_icon_name()
-        new_icon = "media-playback-start-symbolic" if is_currently_playing else "media-playback-pause-symbolic"
+        new_icon = (
+            "media-playback-start-symbolic"
+            if is_currently_playing
+            else "media-playback-pause-symbolic"
+        )
         button.set_icon_name(new_icon)
         self._queue_command("play-pause")
 
     # Queues a command to change the player's volume when the user adjusts the slider.
     def on_volume_changed(self, scale):
-        if self._is_volume_changing: return
+        if self._is_volume_changing:
+            return
         volume = scale.get_value()
         self._queue_command(f"volume {volume}")
 
@@ -527,14 +612,21 @@ class MediaPlayerWidget(Gtk.Box):
             return GLib.SOURCE_REMOVE
 
         players_output = self._run_sync_command(["playerctl", "-l"])
-        new_players = [p for p in (players_output.split('\n') if players_output else []) if 'firefox' not in p.lower()]
+        new_players = [
+            p
+            for p in (players_output.split("\n") if players_output else [])
+            if "firefox" not in p.lower()
+        ]
 
         if new_players != self.players or force_update:
             self.players = new_players
             self._rebuild_player_buttons()
 
         target_player = None
-        if self.saved_player_preference and self.saved_player_preference in self.players:
+        if (
+            self.saved_player_preference
+            and self.saved_player_preference in self.players
+        ):
             target_player = self.saved_player_preference
         elif self.current_player and self.current_player in self.players:
             target_player = self.current_player
@@ -553,10 +645,16 @@ class MediaPlayerWidget(Gtk.Box):
             return GLib.SOURCE_CONTINUE
 
         # Batched command: get status, position, length, volume, art, title, artist in ONE call
-        metadata_output = self._run_sync_command([
-            "playerctl", "-p", self.current_player, "metadata", "--format",
-            "{{status}};{{position}};{{mpris:length}};{{volume}};{{mpris:artUrl}};{{title}};{{artist}}"
-        ])
+        metadata_output = self._run_sync_command(
+            [
+                "playerctl",
+                "-p",
+                self.current_player,
+                "metadata",
+                "--format",
+                "{{status}};{{position}};{{mpris:length}};{{volume}};{{mpris:artUrl}};{{title}};{{artist}}",
+            ]
+        )
         position_str = None  # Position now included in batched call
 
         if not metadata_output:
@@ -566,10 +664,16 @@ class MediaPlayerWidget(Gtk.Box):
 
         try:
             # Parse batched output: status;position;length;volume;artUrl;title;artist
-            status, position_us_str, length_us_str, vol_str, art_url, title, artist = metadata_output.split(';', 6)
+            status, position_us_str, length_us_str, vol_str, art_url, title, artist = (
+                metadata_output.split(";", 6)
+            )
 
-            is_playing = (status == 'Playing')
-            self.play_pause_button.set_icon_name("media-playback-pause-symbolic" if is_playing else "media-playback-start-symbolic")
+            is_playing = status == "Playing"
+            self.play_pause_button.set_icon_name(
+                "media-playback-pause-symbolic"
+                if is_playing
+                else "media-playback-start-symbolic"
+            )
             self.title_label.set_label(title or "Unknown Title")
             self.artist_label.set_label(artist or "Unknown Artist")
 
@@ -587,10 +691,12 @@ class MediaPlayerWidget(Gtk.Box):
                     length_s = 0
             except (ValueError, TypeError):
                 length_s = 0
-            
+
             # Parse position (also in microseconds from MPRIS)
             try:
-                position_s = int(float(position_us_str) / 1000000) if position_us_str else 0
+                position_s = (
+                    int(float(position_us_str) / 1000000) if position_us_str else 0
+                )
                 # Validate position is within bounds
                 if position_s < 0:
                     position_s = 0
@@ -600,25 +706,37 @@ class MediaPlayerWidget(Gtk.Box):
                 position_s = 0
 
             if not self._is_seeking:
-                self.time_label.set_text(f"{self.format_time(position_s)} / {self.format_time(length_s)}")
-                self.progress_widget.set_progress(position_s / length_s if length_s > 0 else 0)
+                self.time_label.set_text(
+                    f"{self.format_time(position_s)} / {self.format_time(length_s)}"
+                )
+                self.progress_widget.set_progress(
+                    position_s / length_s if length_s > 0 else 0
+                )
 
             if art_url != self._last_known_art_url:
                 self._last_known_art_url = art_url
-                if art_url and art_url.startswith(('http', 'file')):
-                    if art_url.startswith('http'):
+                if art_url and art_url.startswith(("http", "file")):
+                    if art_url.startswith("http"):
                         self.album_art.set_from_url(art_url)
                     else:
-                        self.album_art.set_from_file(art_url.replace('file://', ''))
+                        self.album_art.set_from_file(art_url.replace("file://", ""))
                 else:
                     self.album_art.set_default_icon()
 
             self._is_volume_changing = True
-            try: self.volume_scale.set_value(float(vol_str))
-            except (ValueError, TypeError): self.volume_scale.set_value(0.5)
+            try:
+                self.volume_scale.set_value(float(vol_str))
+            except (ValueError, TypeError):
+                self.volume_scale.set_value(0.5)
             self._is_volume_changing = False
 
-            for w in [self.play_pause_button, self.prev_button, self.next_button, self.volume_scale, self.progress_widget]:
+            for w in [
+                self.play_pause_button,
+                self.prev_button,
+                self.next_button,
+                self.volume_scale,
+                self.progress_widget,
+            ]:
                 w.set_sensitive(True)
 
             # Adaptive polling: 1s when playing, 5s when paused (reduces CPU when idle)
@@ -636,22 +754,30 @@ class MediaPlayerWidget(Gtk.Box):
     # Called when the user clicks the circular progress bar. It calculates
     # the new position and queues a seek command.
     def on_seek(self, progress):
-        if not self.current_player: return
-        length_us_str = self._run_sync_command(["playerctl", "-p", self.current_player, "metadata", "mpris:length"])
+        if not self.current_player:
+            return
+        length_us_str = self._run_sync_command(
+            ["playerctl", "-p", self.current_player, "metadata", "mpris:length"]
+        )
 
-        try: total_seconds = int(float(length_us_str) / 1000000)
-        except (ValueError, TypeError, AttributeError): return
-        if total_seconds == 0: return
+        try:
+            total_seconds = int(float(length_us_str) / 1000000)
+        except (ValueError, TypeError, AttributeError):
+            return
+        if total_seconds == 0:
+            return
 
         self._is_seeking = True
         target_seconds = int(total_seconds * progress)
         self.progress_widget.set_progress(progress)
-        self.time_label.set_text(f"{self.format_time(target_seconds)} / {self.format_time(total_seconds)}")
+        self.time_label.set_text(
+            f"{self.format_time(target_seconds)} / {self.format_time(total_seconds)}"
+        )
 
         target_position_for_playerctl = total_seconds * progress
         self._queue_command(f"position {target_position_for_playerctl}")
 
-        GLib.timeout_add(1000, lambda: setattr(self, '_is_seeking', False))
+        GLib.timeout_add(1000, lambda: setattr(self, "_is_seeking", False))
 
     # Refreshes the row of player icons at the top, adding or removing
     # them as players open or close.
@@ -662,7 +788,9 @@ class MediaPlayerWidget(Gtk.Box):
 
         for player_name in self.players:
             button = PlayerIconButton(player_name)
-            button.connect("clicked", lambda b, p=player_name: self.on_player_selected(p))
+            button.connect(
+                "clicked", lambda b, p=player_name: self.on_player_selected(p)
+            )
             self.player_buttons.append(button)
             self.players_box.append(button)
 
@@ -686,13 +814,20 @@ class MediaPlayerWidget(Gtk.Box):
         self._last_known_art_url = None
         self._last_known_title = None  # Reset title tracking
         self._is_seeking = False  # Reset seeking state
-        for w in [self.play_pause_button, self.prev_button, self.next_button, self.volume_scale, self.progress_widget]:
+        for w in [
+            self.play_pause_button,
+            self.prev_button,
+            self.next_button,
+            self.volume_scale,
+            self.progress_widget,
+        ]:
             w.set_sensitive(False)
 
     # A small utility to convert a number of seconds into a nice 'MM:SS'
     # or 'H:MM:SS' format for display.
     def format_time(self, seconds):
-        if seconds < 0: seconds = 0
+        if seconds < 0:
+            seconds = 0
         m, s = divmod(seconds, 60)
         h, m = divmod(m, 60)
         if h > 0:

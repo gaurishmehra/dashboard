@@ -1,16 +1,19 @@
-Copyright (c) 2025 Gaurish Mehra
+Copyright (c) Gaurish Mehra
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to use
-the Software strictly for personal purposes only, without needing permission 
-from the author, Gaurish Mehra. 
+1. UNIVERSAL PERMISSION TO USE
+Permission is hereby granted to any person or entity obtaining a copy of this software and associated documentation files (the "Software") to execute and run the Software for any purpose, including commercial and private use.
 
-For any use beyond strictly personal use, including commercial purposes or making a profit, permission must be obtained from the author. The following conditions apply:
-- The Software may not be used for any commercial purposes or to make a profit without permission.
-- No one may use this software or a variation of it to make a profit in any form without permission.
-- You may not create derivative works from the Software without permission from the author.
-- Forks for personal use are permitted without needing permission from the author.
+2. RESTRICTIONS ON MODIFICATION AND FORKS
+The rights to modify, fork, and create derivative works are strictly limited to personal, non commercial use only.
+   a. You may modify the Software for your own private study or personal use.
+   b. You may NOT use forks or derivative works for commercial purposes, business operations, or to generate profit.
+   c. You may NOT distribute, sub license, or publish modified versions, forks, or derivative works of the Software without express written permission from the author.
 
-This license applies to all commits made on the repository, whether before or after this license update. The license may change at any time, and such changes will apply to past, present, and future code.
+3. APPLICABILITY AND UPDATES
+The author reserves the right to modify this license at any time. The terms of the most current license version hosted in the repository's main branch apply to:
+   a. Any continued use of the Software.
+   b. Any new downloads or access of the Software, regardless of whether the specific code version or commit being accessed was created prior to this license update. 
+By downloading or using any version of this Software, you agree to be bound by the license terms currently in effect.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. ANY USE OF THIS SOFTWARE, WITH OR WITHOUT PERMISSION, IS AT YOUR OWN RISK.
+4. WARRANTY DISCLAIMER
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

@@ -1,6 +1,7 @@
 import gi
-gi.require_version('Gtk', '4.0')
-gi.require_version('Adw', '1')
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw, GLib, Gdk, Pango
 import subprocess
 import os
@@ -12,40 +13,55 @@ import threading
 # This widget requires 'cliphist' and 'wl-clipboard' to be installed on your system.
 # It uses 'cliphist' for history management and 'wl-copy' for copying items.
 
+
 def highlight_text(text, search_term):
     """Highlights search_term in text using Pango markup, case-insensitively."""
     if not search_term or not text:
         return GLib.markup_escape_text(text)
-    
+
     try:
         escaped_text = GLib.markup_escape_text(text)
         escaped_search = re.escape(search_term)
-        highlight_format = "<span background='#FFFF004D' font_weight='bold'>\\g<0></span>"
-        highlighted_text = re.sub(f'({escaped_search})', highlight_format, escaped_text, flags=re.IGNORECASE)
+        highlight_format = (
+            "<span background='#FFFF004D' font_weight='bold'>\\g<0></span>"
+        )
+        highlighted_text = re.sub(
+            f"({escaped_search})", highlight_format, escaped_text, flags=re.IGNORECASE
+        )
         return highlighted_text
     except Exception:
         return GLib.markup_escape_text(text)
 
+
 def get_full_clipboard_content(item_text):
     """Decodes the full clipboard content from a cliphist list item."""
     try:
-        process = subprocess.Popen(['cliphist', 'decode'], stdin=subprocess.PIPE,
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        stdout, stderr = process.communicate(input=item_text.encode('utf-8'))
+        process = subprocess.Popen(
+            ["cliphist", "decode"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        stdout, stderr = process.communicate(input=item_text.encode("utf-8"))
         if process.returncode != 0:
             print(f"cliphist decode error: {stderr.decode()}")
             return None
-        return stdout.decode('utf-8', errors='ignore')
+        return stdout.decode("utf-8", errors="ignore")
     except Exception as e:
         print(f"Error getting full content: {e}")
         return None
 
+
 def get_clipboard_bytes(item_text):
     """Decodes the full clipboard bytes from a cliphist list item."""
     try:
-        process = subprocess.Popen(['cliphist', 'decode'], stdin=subprocess.PIPE,
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        stdout, stderr = process.communicate(input=item_text.encode('utf-8'))
+        process = subprocess.Popen(
+            ["cliphist", "decode"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        stdout, stderr = process.communicate(input=item_text.encode("utf-8"))
         if process.returncode != 0:
             print(f"cliphist decode error: {stderr.decode()}")
             return None
@@ -54,20 +70,23 @@ def get_clipboard_bytes(item_text):
         print(f"Error getting full bytes: {e}")
         return None
 
+
 def is_image_item(item_text: str) -> bool:
-    item_content = item_text.split('\t', 1)[-1]
-    return ('[i]' in item_text) or item_content.strip().startswith('[[ binary data')
+    item_content = item_text.split("\t", 1)[-1]
+    return ("[i]" in item_text) or item_content.strip().startswith("[[ binary data")
+
 
 def preview_text_of(item_text: str) -> str:
-    preview = item_text.split('\t', 1)[-1].strip()
-    preview = re.sub(r'\s+', ' ', preview).strip()
+    preview = item_text.split("\t", 1)[-1].strip()
+    preview = re.sub(r"\s+", " ", preview).strip()
     return preview
+
 
 # Represents a single, expandable item in the clipboard history.
 class ClipboardRow(Gtk.ListBoxRow):
     def __init__(self, item_text, parent_widget, search_term=None):
         super().__init__()
-        
+
         self.add_css_class("notification-row")
         self.item_text = item_text
         self.parent_widget = parent_widget
@@ -95,46 +114,44 @@ class ClipboardRow(Gtk.ListBoxRow):
 
     def create_header(self):
         header_box = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL, 
+            orientation=Gtk.Orientation.HORIZONTAL,
             spacing=12,
-            margin_top=12, 
-            margin_bottom=12, 
-            margin_start=16, 
-            margin_end=16
+            margin_top=12,
+            margin_bottom=12,
+            margin_start=16,
+            margin_end=16,
         )
 
         # Avatar
         self.avatar = Adw.Avatar(
-            size=48, 
-            halign=Gtk.Align.CENTER, 
-            valign=Gtk.Align.CENTER
+            size=48, halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER
         )
         self.load_avatar_icon()
 
         # Content section
         content_box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, 
+            orientation=Gtk.Orientation.VERTICAL,
             spacing=4,
             hexpand=True,
-            valign=Gtk.Align.CENTER
+            valign=Gtk.Align.CENTER,
         )
 
         # App name
         app_name_label = Gtk.Label(
             label="Clipboard",
-            halign=Gtk.Align.START, 
-            xalign=0, 
-            css_classes=["app-name", "title-4"]
+            halign=Gtk.Align.START,
+            xalign=0,
+            css_classes=["app-name", "title-4"],
         )
 
         # Summary
         summary_text = "Image" if self.is_image else preview_text_of(self.item_text)
         summary_label = Gtk.Label(
-            halign=Gtk.Align.START, 
-            xalign=0, 
+            halign=Gtk.Align.START,
+            xalign=0,
             ellipsize=Pango.EllipsizeMode.END,
-            max_width_chars=50, 
-            css_classes=["summary-label", "body"]
+            max_width_chars=50,
+            css_classes=["summary-label", "body"],
         )
         summary_label.set_markup(highlight_text(summary_text, self.search_term))
 
@@ -143,9 +160,9 @@ class ClipboardRow(Gtk.ListBoxRow):
 
         # Expand icon (always expandable)
         self.expand_icon = Gtk.Image(
-            icon_name="pan-end-symbolic", 
-            css_classes=["expand-icon"], 
-            valign=Gtk.Align.CENTER
+            icon_name="pan-end-symbolic",
+            css_classes=["expand-icon"],
+            valign=Gtk.Align.CENTER,
         )
         header_box.append(self.avatar)
         header_box.append(content_box)
@@ -157,7 +174,7 @@ class ClipboardRow(Gtk.ListBoxRow):
         self.body_revealer = Gtk.Revealer(
             transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN,
             transition_duration=150,
-            reveal_child=False
+            reveal_child=False,
         )
         self.main_box.append(self.body_revealer)
 
@@ -172,7 +189,7 @@ class ClipboardRow(Gtk.ListBoxRow):
             margin_start=76,  # Align with content, accounting for avatar
             margin_end=16,
             margin_bottom=20,
-            css_classes=["expanded-content"]
+            css_classes=["expanded-content"],
         )
 
         if not self.is_image:
@@ -186,7 +203,6 @@ class ClipboardRow(Gtk.ListBoxRow):
         self.body_built = True
 
     def create_image_placeholder_section(self, container):
-        # Image container with proper styling
         image_frame = Gtk.Frame(css_classes=["notification-image-frame"])
         image_container = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
@@ -194,24 +210,22 @@ class ClipboardRow(Gtk.ListBoxRow):
             margin_top=8,
             margin_bottom=8,
             margin_start=8,
-            margin_end=8
+            margin_end=8,
         )
 
-        # Placeholder for image
         self.image_widget = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
             spacing=8,
             halign=Gtk.Align.CENTER,
             valign=Gtk.Align.CENTER,
-            height_request=100
+            height_request=100,
         )
 
         self.image_spinner = Gtk.Spinner()
         loading_label = Gtk.Label(
-            label="Loading image...",
-            css_classes=["dim-label", "caption"]
+            label="Loading image...", css_classes=["dim-label", "caption"]
         )
-        
+
         self.image_widget.append(self.image_spinner)
         self.image_widget.append(loading_label)
 
@@ -220,40 +234,38 @@ class ClipboardRow(Gtk.ListBoxRow):
         container.append(image_frame)
 
     def create_text_placeholder_section(self, container):
-        # Keep only the outer frame; put the scroller directly inside it
-        body_frame = Gtk.Frame(css_classes=["notification-body-frame"])
+        body_container = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            css_classes=["notification-body-frame"],
+        )
 
-        # Allow horizontal scrolling to avoid breaking single long lines
         self.text_scrolled = Gtk.ScrolledWindow(
             css_classes=["notification-body-scroll"],
-            hscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
+            hscrollbar_policy=Gtk.PolicyType.NEVER,
             vscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
             min_content_height=200,
             max_content_height=400,
             propagate_natural_height=True,
-            vexpand=True
+            vexpand=True,
         )
 
-        # Placeholder while loading
         self.text_placeholder = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
             spacing=8,
             halign=Gtk.Align.CENTER,
             valign=Gtk.Align.CENTER,
-            height_request=100
+            height_request=100,
         )
         self.text_spinner = Gtk.Spinner()
         loading_label = Gtk.Label(
-            label="Loading content...",
-            css_classes=["dim-label", "caption"]
+            label="Loading content...", css_classes=["dim-label", "caption"]
         )
         self.text_placeholder.append(self.text_spinner)
         self.text_placeholder.append(loading_label)
 
         self.text_scrolled.set_child(self.text_placeholder)
-        body_frame.set_child(self.text_scrolled)
-        container.append(body_frame)
-
+        body_container.append(self.text_scrolled)
+        container.append(body_container)
 
     def create_action_section(self, container):
         # Action buttons
@@ -261,27 +273,23 @@ class ClipboardRow(Gtk.ListBoxRow):
             orientation=Gtk.Orientation.HORIZONTAL,
             spacing=8,
             halign=Gtk.Align.END,
-            css_classes=["notification-actions"]
+            css_classes=["notification-actions"],
         )
 
-        copy_button = Gtk.Button(
-            label="Copy",
-            css_classes=["pill"]
-        )
+        copy_button = Gtk.Button(label="Copy", css_classes=["pill"])
         copy_button.connect("clicked", self.on_copy_clicked)
         action_box.append(copy_button)
 
-        delete_button = Gtk.Button(
-            label="Delete",
-            css_classes=["pill"]
-        )
+        delete_button = Gtk.Button(label="Delete", css_classes=["pill"])
         delete_button.connect("clicked", self.on_delete_clicked)
         action_box.append(delete_button)
 
         container.append(action_box)
 
     def load_avatar_icon(self):
-        icon_name = "image-x-generic-symbolic" if self.is_image else "edit-paste-symbolic"
+        icon_name = (
+            "image-x-generic-symbolic" if self.is_image else "edit-paste-symbolic"
+        )
         self.avatar.set_icon_name(icon_name)
 
     def load_content_async(self):
@@ -307,13 +315,15 @@ class ClipboardRow(Gtk.ListBoxRow):
                 raise Exception("No bytes data")
 
             texture = Gdk.Texture.new_from_bytes(GLib.Bytes.new(bytes_data))
-            
+
             # Calculate appropriate size
             original_width = texture.get_width()
             original_height = texture.get_height()
             max_width = 400
             max_height = 300
-            scale_factor = min(max_width / original_width, max_height / original_height, 1.0)
+            scale_factor = min(
+                max_width / original_width, max_height / original_height, 1.0
+            )
             display_width = int(original_width * scale_factor)
             display_height = int(original_height * scale_factor)
 
@@ -330,7 +340,7 @@ class ClipboardRow(Gtk.ListBoxRow):
             info_label = Gtk.Label(
                 label=size_text,
                 css_classes=["dim-label", "caption"],
-                halign=Gtk.Align.CENTER
+                halign=Gtk.Align.CENTER,
             )
 
             # Clear placeholder
@@ -339,24 +349,23 @@ class ClipboardRow(Gtk.ListBoxRow):
 
             self.image_widget.append(image_widget)
             self.image_widget.append(info_label)
-            
+
             self.content_loaded = True
 
         except Exception as e:
             # Show error state
             while self.image_widget.get_first_child():
                 self.image_widget.remove(self.image_widget.get_first_child())
-            
+
             error_icon = Gtk.Image(
                 icon_name="image-missing-symbolic",
                 pixel_size=48,
-                css_classes=["dim-label"]
+                css_classes=["dim-label"],
             )
             error_label = Gtk.Label(
-                label="Failed to load image",
-                css_classes=["dim-label", "caption"]
+                label="Failed to load image", css_classes=["dim-label", "caption"]
             )
-            
+
             self.image_widget.append(error_icon)
             self.image_widget.append(error_label)
             print(f"Error loading clipboard image: {e}")
@@ -364,38 +373,40 @@ class ClipboardRow(Gtk.ListBoxRow):
         return GLib.SOURCE_REMOVE
 
     def load_text_worker(self):
-        body_text = self.parent_widget.get_full_content_for_item(self.item_text) or preview_text_of(self.item_text)
+        body_text = self.parent_widget.get_full_content_for_item(
+            self.item_text
+        ) or preview_text_of(self.item_text)
         GLib.idle_add(self.update_text_ui, body_text)
 
-# Replace your update_text_ui with this
+    # Replace your update_text_ui with this
     def update_text_ui(self, body_text):
         try:
+            char_limit = self.calculate_char_limit()
+            max_line_length = (
+                max(len(line) for line in body_text.split("\n")) if body_text else 0
+            )
+            needs_wrap = max_line_length > char_limit
+
             body_label = Gtk.Label(
                 halign=Gtk.Align.START,
                 xalign=0,
+                wrap=needs_wrap,
+                wrap_mode=Pango.WrapMode.WORD_CHAR
+                if needs_wrap
+                else Pango.WrapMode.NONE,
                 selectable=True,
-                css_classes=["notification-body-text"]
+                css_classes=["notification-body-text"],
             )
-            # Do not wrap; keep single lines single, use horizontal scroll if needed
-            body_label.set_wrap(False)
             body_label.set_ellipsize(Pango.EllipsizeMode.NONE)
-
-            # Add padding so there is only one visible box (the frame), with inner padding
-            body_label.set_margin_top(12)
-            body_label.set_margin_bottom(12)
-            body_label.set_margin_start(12)
-            body_label.set_margin_end(12)
 
             body_label.set_markup(highlight_text(body_text, self.search_term))
 
-            # Replace placeholder directly (Gtk.ScrolledWindow has no remove() in GTK 4)
             self.text_scrolled.set_child(body_label)
             self.content_loaded = True
 
         except Exception as e:
             error_label = Gtk.Label(
-                label="Failed to load content",
-                css_classes=["dim-label", "caption"]
+                label="Failed to load content", css_classes=["dim-label", "caption"]
             )
             error_label.set_margin_top(12)
             error_label.set_margin_bottom(12)
@@ -419,7 +430,7 @@ class ClipboardRow(Gtk.ListBoxRow):
             if self.expand_icon:
                 self.expand_icon.set_from_icon_name("pan-up-symbolic")
             self.add_css_class("expanded")
-            
+
             # Start loading content async
             self.load_content_async()
         else:
@@ -429,11 +440,15 @@ class ClipboardRow(Gtk.ListBoxRow):
 
     def on_copy_clicked(self, button):
         try:
-            process = subprocess.Popen(['cliphist', 'decode'], stdin=subprocess.PIPE,
-                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            stdout, _ = process.communicate(input=self.item_text.encode('utf-8'))
+            process = subprocess.Popen(
+                ["cliphist", "decode"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            stdout, _ = process.communicate(input=self.item_text.encode("utf-8"))
             if process.returncode == 0:
-                copy_process = subprocess.Popen(['wl-copy'], stdin=subprocess.PIPE)
+                copy_process = subprocess.Popen(["wl-copy"], stdin=subprocess.PIPE)
                 copy_process.communicate(input=stdout)
                 self.parent_widget.show_toast("Copied to clipboard!")
         except Exception as e:
@@ -446,12 +461,29 @@ class ClipboardRow(Gtk.ListBoxRow):
 
     def perform_delete(self):
         try:
-            subprocess.run(['cliphist', 'delete'], input=self.item_text.encode('utf-8'), check=True)
+            subprocess.run(
+                ["cliphist", "delete"], input=self.item_text.encode("utf-8"), check=True
+            )
         except Exception as e:
             print(f"Error deleting item: {e}")
         finally:
-            self.parent_widget.load_history() # Trigger a refresh
+            self.parent_widget.load_history()  # Trigger a refresh
         return GLib.SOURCE_REMOVE
+
+    def calculate_char_limit(self):
+        try:
+            context = self.get_pango_context()
+            metrics = context.get_metrics(context.get_font_description())
+            avg_char_width = metrics.get_approximate_char_width()
+            char_width_pixels = avg_char_width / Pango.SCALE
+            available_width = 500
+            return (
+                int(available_width / char_width_pixels)
+                if char_width_pixels > 0
+                else 60
+            )
+        except:
+            return 60
 
     def cleanup(self):
         """Clean up resources when row is removed"""
@@ -462,6 +494,7 @@ class ClipboardRow(Gtk.ListBoxRow):
         if self.text_scrolled:
             # Clear the scroller's child; ScrolledWindow has no remove() in GTK 4
             self.text_scrolled.set_child(None)
+
 
 # The main widget for the clipboard history panel.
 class ClipboardWidget(Gtk.Box):
@@ -486,7 +519,8 @@ class ClipboardWidget(Gtk.Box):
         self.search_state = None  # dict with keys: term, type_filtered, results, scan_index, fully_scanned, scan_source_id
 
     def activate(self):
-        if self.is_active: return
+        if self.is_active:
+            return
 
         if not self.ui_built:
             self.create_ui()
@@ -497,7 +531,8 @@ class ClipboardWidget(Gtk.Box):
         self.history_monitor_id = GLib.timeout_add_seconds(10, self.load_history, False)
 
     def deactivate(self):
-        if not self.is_active: return
+        if not self.is_active:
+            return
         self.is_active = False
         if self.history_monitor_id > 0:
             GLib.source_remove(self.history_monitor_id)
@@ -516,11 +551,23 @@ class ClipboardWidget(Gtk.Box):
 
     def create_ui(self):
         """Builds the entire UI and is only called once."""
-        header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12,
-                             margin_top=16, margin_bottom=12, margin_start=20, margin_end=20)
-        title_label = Gtk.Label(label="Clipboard History", halign=Gtk.Align.START, css_classes=["title-large"])
+        header_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=12,
+            margin_top=16,
+            margin_bottom=12,
+            margin_start=20,
+            margin_end=20,
+        )
+        title_label = Gtk.Label(
+            label="Clipboard History",
+            halign=Gtk.Align.START,
+            css_classes=["title-large"],
+        )
         header_box.append(title_label)
-        self.search_entry = Gtk.SearchEntry(placeholder_text="Search history...", hexpand=True, margin_start=12)
+        self.search_entry = Gtk.SearchEntry(
+            placeholder_text="Search history...", hexpand=True, margin_start=12
+        )
         self.search_entry.connect("search-changed", self.on_search_changed_debounced)
         header_box.append(self.search_entry)
 
@@ -550,10 +597,17 @@ class ClipboardWidget(Gtk.Box):
         loading_page = self.create_loading_page()
         self.content_stack.add_named(loading_page, "loading")
 
-        scrolled_area = Gtk.ScrolledWindow(vexpand=True, css_classes=["invisible-scroll"])
+        scrolled_area = Gtk.ScrolledWindow(
+            vexpand=True, css_classes=["invisible-scroll"]
+        )
         scrolled_area.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        self.listbox = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE, css_classes=["notifications-list"],
-                                   margin_start=16, margin_end=16, margin_bottom=8)
+        self.listbox = Gtk.ListBox(
+            selection_mode=Gtk.SelectionMode.SINGLE,
+            css_classes=["notifications-list"],
+            margin_start=16,
+            margin_end=16,
+            margin_bottom=8,
+        )
         scrolled_area.set_child(self.listbox)
         self.listbox.connect("row-activated", lambda lb, row: row.toggle_expanded())
         self.content_stack.add_named(scrolled_area, "content")
@@ -561,7 +615,9 @@ class ClipboardWidget(Gtk.Box):
         footer_box = Gtk.Box(margin_start=20, margin_end=20, margin_bottom=16)
         stats_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         self.stats_label = Gtk.Label(halign=Gtk.Align.START, css_classes=["dim-label"])
-        self.page_info_label = Gtk.Label(halign=Gtk.Align.START, css_classes=["dim-label"])
+        self.page_info_label = Gtk.Label(
+            halign=Gtk.Align.START, css_classes=["dim-label"]
+        )
         stats_box.append(self.stats_label)
         stats_box.append(self.page_info_label)
         footer_box.append(stats_box)
@@ -594,13 +650,15 @@ class ClipboardWidget(Gtk.Box):
     def load_history(self, is_initial_load=False):
         """Starts the clipboard history loading process in a background thread."""
         if self.is_loading:
-            return True 
-        
+            return True
+
         self.is_loading = True
         if is_initial_load:
             self.content_stack.set_visible_child_name("loading")
 
-        thread = threading.Thread(target=self._load_history_thread, args=(is_initial_load,))
+        thread = threading.Thread(
+            target=self._load_history_thread, args=(is_initial_load,)
+        )
         thread.daemon = True
         thread.start()
         return True
@@ -610,11 +668,15 @@ class ClipboardWidget(Gtk.Box):
         new_items = []
         error = None
         try:
-            result = subprocess.run(['cliphist', 'list'], capture_output=True, text=True, check=True)
-            new_items = result.stdout.strip().split('\n') if result.stdout.strip() else []
+            result = subprocess.run(
+                ["cliphist", "list"], capture_output=True, text=True, check=True
+            )
+            new_items = (
+                result.stdout.strip().split("\n") if result.stdout.strip() else []
+            )
         except Exception as e:
             error = e
-        
+
         GLib.idle_add(self._on_history_loaded, new_items, error, is_initial_load)
 
     def _on_history_loaded(self, new_items, error, is_initial_load):
@@ -623,9 +685,13 @@ class ClipboardWidget(Gtk.Box):
 
         if error:
             if isinstance(error, FileNotFoundError):
-                self.show_placeholder("Error: `cliphist` not found.", "dialog-error-symbolic")
+                self.show_placeholder(
+                    "Error: `cliphist` not found.", "dialog-error-symbolic"
+                )
             else:
-                self.show_placeholder(f"Error loading history:\n{str(error)}", "dialog-error-symbolic")
+                self.show_placeholder(
+                    f"Error loading history:\n{str(error)}", "dialog-error-symbolic"
+                )
             self.all_items = []
         else:
             if new_items != self.all_items or is_initial_load:
@@ -634,7 +700,7 @@ class ClipboardWidget(Gtk.Box):
                 # Do NOT pre-cache everything; only load what's on the current page.
                 self.reset_search_state()
                 self.filter_and_paginate_items()
-        
+
         self.content_stack.set_visible_child_name("content")
         return GLib.SOURCE_REMOVE
 
@@ -647,11 +713,18 @@ class ClipboardWidget(Gtk.Box):
         self.listbox.add_controller(list_key_controller)
 
     def on_win_key_pressed(self, controller, keyval, keycode, state):
-        if self.search_entry.has_focus(): return False
-        if keyval in (Gdk.KEY_Left, Gdk.KEY_Page_Up) and self.prev_button.get_sensitive():
+        if self.search_entry.has_focus():
+            return False
+        if (
+            keyval in (Gdk.KEY_Left, Gdk.KEY_Page_Up)
+            and self.prev_button.get_sensitive()
+        ):
             self.on_prev_page_clicked(None)
             return True
-        elif keyval in (Gdk.KEY_Right, Gdk.KEY_Page_Down) and self.next_button.get_sensitive():
+        elif (
+            keyval in (Gdk.KEY_Right, Gdk.KEY_Page_Down)
+            and self.next_button.get_sensitive()
+        ):
             self.on_next_page_clicked(None)
             return True
         elif keyval == Gdk.KEY_F5:
@@ -661,8 +734,9 @@ class ClipboardWidget(Gtk.Box):
 
     def on_list_key_pressed(self, controller, keyval, keycode, state):
         selected_row = self.listbox.get_selected_row()
-        if not selected_row: return False
-        
+        if not selected_row:
+            return False
+
         if keyval == Gdk.KEY_Return:
             selected_row.on_copy_clicked(None)
             return True
@@ -670,9 +744,9 @@ class ClipboardWidget(Gtk.Box):
             selected_row.on_delete_clicked(None)
             return True
         return False
-        
+
     def on_search_changed_debounced(self, entry):
-        if self.search_timeout_id > 0: 
+        if self.search_timeout_id > 0:
             GLib.source_remove(self.search_timeout_id)
         self.search_timeout_id = GLib.timeout_add(300, self.on_search_or_filter_changed)
 
@@ -691,14 +765,14 @@ class ClipboardWidget(Gtk.Box):
         self.search_state = None
 
     def _cancel_search_scan(self):
-        if self.search_state and self.search_state.get('scan_source_id'):
-            GLib.source_remove(self.search_state['scan_source_id'])
-            self.search_state['scan_source_id'] = 0
+        if self.search_state and self.search_state.get("scan_source_id"):
+            GLib.source_remove(self.search_state["scan_source_id"])
+            self.search_state["scan_source_id"] = 0
 
     def item_matches_search_quick(self, item_text, term_lower):
         """Quick check without decoding: only uses preview text or 'Image' placeholder."""
         if is_image_item(item_text):
-            return 'image'.startswith(term_lower) or (term_lower in 'image')
+            return "image".startswith(term_lower) or (term_lower in "image")
         preview = preview_text_of(item_text)
         return term_lower in preview.lower()
 
@@ -717,35 +791,43 @@ class ClipboardWidget(Gtk.Box):
 
         def step():
             state = self.search_state
-            type_filtered = state['type_filtered']
-            term_lower = state['term'].lower()
+            type_filtered = state["type_filtered"]
+            term_lower = state["term"].lower()
 
             # Process a small chunk per idle to keep UI responsive
             budget = 24
-            while budget > 0 and state['scan_index'] < len(type_filtered) and len(state['results']) < target_count:
-                item = type_filtered[state['scan_index']]
-                state['scan_index'] += 1
+            while (
+                budget > 0
+                and state["scan_index"] < len(type_filtered)
+                and len(state["results"]) < target_count
+            ):
+                item = type_filtered[state["scan_index"]]
+                state["scan_index"] += 1
 
                 if self.item_matches_search_quick(item, term_lower):
-                    state['results'].append(item)
+                    state["results"].append(item)
                 else:
                     # Only decode if needed, and only for text
-                    if not is_image_item(item) and self.item_matches_search_full(item, term_lower):
-                        state['results'].append(item)
+                    if not is_image_item(item) and self.item_matches_search_full(
+                        item, term_lower
+                    ):
+                        state["results"].append(item)
 
                 budget -= 1
 
-            if len(state['results']) >= target_count or state['scan_index'] >= len(type_filtered):
+            if len(state["results"]) >= target_count or state["scan_index"] >= len(
+                type_filtered
+            ):
                 # Done with this page's quota or exhausted the list
-                state['fully_scanned'] = state['scan_index'] >= len(type_filtered)
-                state['scan_source_id'] = 0
+                state["fully_scanned"] = state["scan_index"] >= len(type_filtered)
+                state["scan_source_id"] = 0
                 self.render_current_page()
                 return GLib.SOURCE_REMOVE
 
             # Keep scanning on next idle
             return GLib.SOURCE_CONTINUE
 
-        self.search_state['scan_source_id'] = GLib.idle_add(step)
+        self.search_state["scan_source_id"] = GLib.idle_add(step)
 
     # ---------- End incremental search helpers ----------
 
@@ -787,9 +869,13 @@ class ClipboardWidget(Gtk.Box):
             total_items = len(type_filtered)
             if total_items == 0:
                 if self.current_filter_mode != "all":
-                    self.show_placeholder("No items match your filter.", "edit-find-symbolic")
+                    self.show_placeholder(
+                        "No items match your filter.", "edit-find-symbolic"
+                    )
                 else:
-                    self.show_placeholder("Clipboard history is empty.", "edit-paste-symbolic")
+                    self.show_placeholder(
+                        "Clipboard history is empty.", "edit-paste-symbolic"
+                    )
                 self.total_pages = 0
                 self.update_page_controls_nonsearch(0)
                 return
@@ -797,26 +883,32 @@ class ClipboardWidget(Gtk.Box):
             self.total_pages = math.ceil(total_items / self.items_per_page)
             self.current_page = max(0, min(self.current_page, self.total_pages - 1))
             start_index = self.current_page * self.items_per_page
-            items_for_page = type_filtered[start_index : start_index + self.items_per_page]
+            items_for_page = type_filtered[
+                start_index : start_index + self.items_per_page
+            ]
 
             self.visible_rows = []
             for item_text in items_for_page:
                 row = ClipboardRow(item_text, self, None)
                 self.listbox.append(row)
                 self.visible_rows.append(row)
-            
+
             self.update_page_controls_nonsearch(total_items)
             return
 
         # Search mode: incremental, one page at a time.
-        if not self.search_state or self.search_state.get('term') != search_text or self.search_state.get('type_filtered') is not type_filtered:
+        if (
+            not self.search_state
+            or self.search_state.get("term") != search_text
+            or self.search_state.get("type_filtered") is not type_filtered
+        ):
             self.search_state = {
-                'term': search_text,
-                'type_filtered': type_filtered,
-                'results': [],
-                'scan_index': 0,
-                'fully_scanned': False,
-                'scan_source_id': 0,
+                "term": search_text,
+                "type_filtered": type_filtered,
+                "results": [],
+                "scan_index": 0,
+                "fully_scanned": False,
+                "scan_source_id": 0,
             }
 
         # Ensure we have enough results to render this page
@@ -840,8 +932,8 @@ class ClipboardWidget(Gtk.Box):
             self.listbox.remove(child)
             child = self.listbox.get_first_child()
 
-        results = self.search_state['results']
-        fully_scanned = self.search_state['fully_scanned']
+        results = self.search_state["results"]
+        fully_scanned = self.search_state["fully_scanned"]
 
         start_index = self.current_page * self.items_per_page
         end_index = start_index + self.items_per_page
@@ -860,7 +952,7 @@ class ClipboardWidget(Gtk.Box):
 
         self.visible_rows = []
         for item_text in slice_items:
-            row = ClipboardRow(item_text, self, self.search_state['term'])
+            row = ClipboardRow(item_text, self, self.search_state["term"])
             self.listbox.append(row)
             self.visible_rows.append(row)
 
@@ -871,13 +963,22 @@ class ClipboardWidget(Gtk.Box):
         while child:
             self.listbox.remove(child)
             child = self.listbox.get_first_child()
-        placeholder_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
-                                 margin_top=40, margin_bottom=40, vexpand=True, hexpand=True,
-                                 halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
+        placeholder_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=12,
+            margin_top=40,
+            margin_bottom=40,
+            vexpand=True,
+            hexpand=True,
+            halign=Gtk.Align.CENTER,
+            valign=Gtk.Align.CENTER,
+        )
         icon = Gtk.Image.new_from_icon_name(icon_name)
         icon.set_pixel_size(48)
         icon.add_css_class("dim-label")
-        label = Gtk.Label(label=text, css_classes=["dim-label"], justify=Gtk.Justification.CENTER)
+        label = Gtk.Label(
+            label=text, css_classes=["dim-label"], justify=Gtk.Justification.CENTER
+        )
         placeholder_box.append(icon)
         placeholder_box.append(label)
         placeholder_row = Gtk.ListBoxRow(selectable=False, activatable=False)
@@ -896,15 +997,19 @@ class ClipboardWidget(Gtk.Box):
         self.filter_and_paginate_items()
 
     def update_page_controls_nonsearch(self, total_items):
-        filter_text = {"all": "items", "text": "text items", "image": "images"}[self.current_filter_mode]
+        filter_text = {"all": "items", "text": "text items", "image": "images"}[
+            self.current_filter_mode
+        ]
         self.stats_label.set_text(f"{total_items} {filter_text}")
-        
+
         has_pagination = total_items > 0 and self.total_pages > 1
         if has_pagination:
-            self.page_info_label.set_text(f"Page {self.current_page + 1} of {self.total_pages}")
+            self.page_info_label.set_text(
+                f"Page {self.current_page + 1} of {self.total_pages}"
+            )
         else:
             self.page_info_label.set_text("")
-        
+
         self.prev_button.set_sensitive(self.current_page > 0)
         self.next_button.set_sensitive(self.current_page < self.total_pages - 1)
         self.prev_button.set_visible(has_pagination)
@@ -921,8 +1026,8 @@ class ClipboardWidget(Gtk.Box):
             self.next_button.set_visible(False)
             return
 
-        results = self.search_state['results']
-        fully_scanned = self.search_state['fully_scanned']
+        results = self.search_state["results"]
+        fully_scanned = self.search_state["fully_scanned"]
 
         # Show results so far; add '+' if not fully scanned
         suffix = "" if fully_scanned else "+"
@@ -943,8 +1048,11 @@ class ClipboardWidget(Gtk.Box):
         self.next_button.set_sensitive(can_next)
 
     def on_clear_clicked(self, button):
-        dialog = Adw.MessageDialog.new(self.get_root(), "Clear Clipboard History?",
-                                       "This will permanently delete all items.")
+        dialog = Adw.MessageDialog.new(
+            self.get_root(),
+            "Clear Clipboard History?",
+            "This will permanently delete all items.",
+        )
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("clear", "Clear All")
         dialog.set_response_appearance("clear", Adw.ResponseAppearance.DESTRUCTIVE)
@@ -954,15 +1062,15 @@ class ClipboardWidget(Gtk.Box):
     def on_clear_dialog_response(self, dialog, response):
         if response == "clear":
             try:
-                subprocess.run(['cliphist', 'wipe'], check=True)
+                subprocess.run(["cliphist", "wipe"], check=True)
                 self.full_content_cache.clear()
-                self.load_history(is_initial_load=True) # Reload with spinner
+                self.load_history(is_initial_load=True)  # Reload with spinner
                 self.show_toast("Clipboard history cleared.")
             except Exception as e:
                 print(f"Error wiping history: {e}")
                 self.show_toast("Error: Failed to clear history.")
         dialog.close()
-        
+
     def show_toast(self, text):
         if self.toast_overlay:
             self.toast_overlay.add_toast(Adw.Toast.new(text))

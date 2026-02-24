@@ -1,6 +1,7 @@
 import gi
-gi.require_version('Gtk', '4.0')
-gi.require_version('Adw', '1')
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw, GLib, Pango, Gio, Gdk
 import json
 import os
@@ -11,6 +12,7 @@ import math
 import threading
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
+
 
 class NotificationRow(Gtk.ListBoxRow):
     def __init__(self, notification, parent_widget, search_term=None):
@@ -31,57 +33,55 @@ class NotificationRow(Gtk.ListBoxRow):
 
     def create_ui(self):
         self.main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        
+
         # Header section (always visible)
         self.create_header()
-        
+
         # Body section (expandable) - create placeholder
         self.create_expandable_body_placeholder()
-        
+
         self.set_child(self.main_box)
 
     def create_header(self):
         header_box = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL, 
+            orientation=Gtk.Orientation.HORIZONTAL,
             spacing=12,
-            margin_top=12, 
-            margin_bottom=12, 
-            margin_start=16, 
-            margin_end=16
+            margin_top=12,
+            margin_bottom=12,
+            margin_start=16,
+            margin_end=16,
         )
 
         # Avatar
         self.avatar = Adw.Avatar(
-            size=48, 
-            halign=Gtk.Align.CENTER, 
-            valign=Gtk.Align.CENTER
+            size=48, halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER
         )
         self.load_avatar_icon()
 
         # Content section
         content_box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, 
+            orientation=Gtk.Orientation.VERTICAL,
             spacing=4,
             hexpand=True,
-            valign=Gtk.Align.CENTER
+            valign=Gtk.Align.CENTER,
         )
 
         # App name
         app_name_label = Gtk.Label(
-            label=self.notification.get('app_name', 'System'),
-            halign=Gtk.Align.START, 
-            xalign=0, 
-            css_classes=["app-name", "title-4"]
+            label=self.notification.get("app_name", "System"),
+            halign=Gtk.Align.START,
+            xalign=0,
+            css_classes=["app-name", "title-4"],
         )
 
         # Summary
-        summary_text = self.notification.get('summary', 'No summary')
+        summary_text = self.notification.get("summary", "No summary")
         summary_label = Gtk.Label(
-            halign=Gtk.Align.START, 
-            xalign=0, 
+            halign=Gtk.Align.START,
+            xalign=0,
             ellipsize=Pango.EllipsizeMode.END,
-            max_width_chars=50, 
-            css_classes=["summary-label", "body"]
+            max_width_chars=50,
+            css_classes=["summary-label", "body"],
         )
         summary_label.set_markup(self.highlight_text(summary_text, self.search_term))
 
@@ -93,19 +93,21 @@ class NotificationRow(Gtk.ListBoxRow):
             label=self.format_timestamp(),
             valign=Gtk.Align.CENTER,
             margin_end=6,
-            css_classes=["time-label", "caption"]
+            css_classes=["time-label", "caption"],
         )
 
         # Expand icon (only if there's body content or image)
-        body_text = self.notification.get('body', '').strip()
-        icon_path = self.notification.get('icon', '')
-        has_expandable_content = bool(body_text or (icon_path and os.path.exists(icon_path)))
-        
+        body_text = self.notification.get("body", "").strip()
+        icon_path = self.notification.get("icon", "")
+        has_expandable_content = bool(
+            body_text or (icon_path and os.path.exists(icon_path))
+        )
+
         if has_expandable_content:
             self.expand_icon = Gtk.Image(
-                icon_name="pan-end-symbolic", 
-                css_classes=["expand-icon"], 
-                valign=Gtk.Align.CENTER
+                icon_name="pan-end-symbolic",
+                css_classes=["expand-icon"],
+                valign=Gtk.Align.CENTER,
             )
             header_box.append(self.avatar)
             header_box.append(content_box)
@@ -120,10 +122,10 @@ class NotificationRow(Gtk.ListBoxRow):
         self.main_box.append(header_box)
 
     def create_expandable_body_placeholder(self):
-        body_text = self.notification.get('body', '').strip()
-        icon_path = self.notification.get('icon', '')
+        body_text = self.notification.get("body", "").strip()
+        icon_path = self.notification.get("icon", "")
         has_image = icon_path and os.path.exists(icon_path)
-        
+
         if not body_text and not has_image:
             self.body_revealer = None
             return
@@ -132,7 +134,7 @@ class NotificationRow(Gtk.ListBoxRow):
         self.body_revealer = Gtk.Revealer(
             transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN,
             transition_duration=150,
-            reveal_child=False
+            reveal_child=False,
         )
         self.main_box.append(self.body_revealer)
 
@@ -147,16 +149,16 @@ class NotificationRow(Gtk.ListBoxRow):
             margin_start=76,  # Align with content, accounting for avatar
             margin_end=16,
             margin_bottom=20,
-            css_classes=["expanded-content"]
+            css_classes=["expanded-content"],
         )
 
         # Add body text section first (give it priority)
-        body_text = self.notification.get('body', '').strip()
+        body_text = self.notification.get("body", "").strip()
         if body_text:
             self.create_body_section(expanded_container, body_text)
 
         # Add image section after text
-        icon_path = self.notification.get('icon', '')
+        icon_path = self.notification.get("icon", "")
         has_image = icon_path and os.path.exists(icon_path)
         if has_image:
             self.create_image_section(expanded_container)
@@ -168,7 +170,6 @@ class NotificationRow(Gtk.ListBoxRow):
         self.body_built = True
 
     def create_image_section(self, container):
-        # Image container with proper styling
         image_frame = Gtk.Frame(css_classes=["notification-image-frame"])
         image_container = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
@@ -176,25 +177,22 @@ class NotificationRow(Gtk.ListBoxRow):
             margin_top=8,
             margin_bottom=8,
             margin_start=8,
-            margin_end=8
+            margin_end=8,
         )
 
-        # Placeholder for image (will be loaded when expanded)
         self.image_widget = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
             spacing=8,
             halign=Gtk.Align.CENTER,
             valign=Gtk.Align.CENTER,
-            height_request=100
+            height_request=100,
         )
 
-        # Loading placeholder
         self.image_spinner = Gtk.Spinner()
         loading_label = Gtk.Label(
-            label="Loading image...",
-            css_classes=["dim-label", "caption"]
+            label="Loading image...", css_classes=["dim-label", "caption"]
         )
-        
+
         self.image_widget.append(self.image_spinner)
         self.image_widget.append(loading_label)
 
@@ -203,51 +201,50 @@ class NotificationRow(Gtk.ListBoxRow):
         container.append(image_frame)
 
     def create_body_section(self, container, body_text):
-        # Body text container - much more generous with space
-        body_frame = Gtk.Frame(css_classes=["notification-body-frame"])
+        body_container = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            css_classes=["notification-body-frame"],
+        )
 
-        # Body text with much better space allocation
         body_label = Gtk.Label(
             halign=Gtk.Align.START,
             xalign=0,
-            wrap=True,
-            wrap_mode=Pango.WrapMode.WORD_CHAR,
             selectable=True,
-            css_classes=["notification-body-text"]
+            css_classes=["notification-body-text"],
         )
         body_label.set_markup(self.highlight_text(body_text, self.search_term))
 
-        # Add padding
-        body_label.set_margin_top(12)
-        body_label.set_margin_bottom(12)
-        body_label.set_margin_start(12)
-        body_label.set_margin_end(12)
+        char_limit = self.calculate_char_limit()
+        max_line_length = (
+            max(len(line) for line in body_text.split("\n")) if body_text else 0
+        )
+        needs_wrap = max_line_length > char_limit
 
-        # More generous height limits and better scrolling behavior
+        if needs_wrap:
+            body_label.set_wrap(True)
+            body_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+
         lines_count = len(body_text.splitlines())
         char_count = len(body_text)
-        
-        # Determine if we need scrolling - more lenient criteria
+
         needs_scrolling = lines_count > 15 or char_count > 1000
-        
+
         if needs_scrolling:
             scrolled_body = Gtk.ScrolledWindow(
                 css_classes=["notification-body-scroll"],
-                hscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
+                hscrollbar_policy=Gtk.PolicyType.NEVER,
                 vscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
-                min_content_height=200,  # Minimum height
-                max_content_height=400,  # Much more generous max height
+                min_content_height=200,
+                max_content_height=400,
                 propagate_natural_height=True,
-                vexpand=True  # Allow it to expand vertically
+                vexpand=True,
             )
             scrolled_body.set_child(body_label)
-            body_frame.set_child(scrolled_body)
+            body_container.append(scrolled_body)
         else:
-            # For shorter text, just let it expand naturally
-            body_label.set_vexpand(True)
-            body_frame.set_child(body_label)
+            body_container.append(body_label)
 
-        container.append(body_frame)
+        container.append(body_container)
 
     def create_action_section(self, container):
         # Action buttons
@@ -255,26 +252,20 @@ class NotificationRow(Gtk.ListBoxRow):
             orientation=Gtk.Orientation.HORIZONTAL,
             spacing=8,
             halign=Gtk.Align.END,
-            css_classes=["notification-actions"]
+            css_classes=["notification-actions"],
         )
 
         # Copy button for body text
-        body_text = self.notification.get('body', '').strip()
+        body_text = self.notification.get("body", "").strip()
         if body_text:
-            copy_button = Gtk.Button(
-                label="Copy Text",
-                css_classes=["pill"]
-            )
+            copy_button = Gtk.Button(label="Copy Text", css_classes=["pill"])
             copy_button.connect("clicked", self.on_copy_text_clicked)
             action_box.append(copy_button)
 
         # Open image button (if image exists)
-        icon_path = self.notification.get('icon', '')
+        icon_path = self.notification.get("icon", "")
         if icon_path and os.path.exists(icon_path):
-            open_image_button = Gtk.Button(
-                label="Open Image",
-                css_classes=["pill"]
-            )
+            open_image_button = Gtk.Button(label="Open Image", css_classes=["pill"])
             open_image_button.connect("clicked", self.on_open_image_clicked)
             action_box.append(open_image_button)
 
@@ -285,21 +276,29 @@ class NotificationRow(Gtk.ListBoxRow):
         """Highlights search_term in text using Pango markup, case-insensitively."""
         if not search_term or not text:
             return GLib.markup_escape_text(text)
-        
+
         try:
             import re
+
             escaped_text = GLib.markup_escape_text(text)
             escaped_search = re.escape(search_term)
-            highlight_format = "<span background='#FFFF004D' font_weight='bold'>\\g<0></span>"
-            highlighted_text = re.sub(f'({escaped_search})', highlight_format, escaped_text, flags=re.IGNORECASE)
+            highlight_format = (
+                "<span background='#FFFF004D' font_weight='bold'>\\g<0></span>"
+            )
+            highlighted_text = re.sub(
+                f"({escaped_search})",
+                highlight_format,
+                escaped_text,
+                flags=re.IGNORECASE,
+            )
             return highlighted_text
         except Exception:
             return GLib.markup_escape_text(text)
 
     def load_avatar_icon(self):
         """Load the avatar icon for the notification header"""
-        icon_path = self.notification.get('icon', '')
-        app_name = self.notification.get('app_name', 'System')
+        icon_path = self.notification.get("icon", "")
+        app_name = self.notification.get("app_name", "System")
 
         if icon_path and os.path.exists(icon_path):
             try:
@@ -316,15 +315,15 @@ class NotificationRow(Gtk.ListBoxRow):
         if self.image_loaded or not self.image_widget:
             return
 
-        if hasattr(self, 'image_spinner'):
+        if hasattr(self, "image_spinner"):
             self.image_spinner.start()
-        
+
         thread = threading.Thread(target=self.load_image_worker, daemon=True)
         thread.start()
 
     def load_image_worker(self):
         """Worker thread for loading image"""
-        icon_path = self.notification.get('icon', '')
+        icon_path = self.notification.get("icon", "")
         if not icon_path or not os.path.exists(icon_path):
             GLib.idle_add(self.update_image_ui_error, "File not found")
             return
@@ -341,12 +340,14 @@ class NotificationRow(Gtk.ListBoxRow):
             # Calculate appropriate size - more generous for images
             original_width = texture.get_width()
             original_height = texture.get_height()
-            
+
             # Allow larger images, but still reasonable
             max_width = 400
             max_height = 300
-            
-            scale_factor = min(max_width / original_width, max_height / original_height, 1.0)
+
+            scale_factor = min(
+                max_width / original_width, max_height / original_height, 1.0
+            )
             display_width = int(original_width * scale_factor)
             display_height = int(original_height * scale_factor)
 
@@ -367,12 +368,12 @@ class NotificationRow(Gtk.ListBoxRow):
             info_label = Gtk.Label(
                 label=size_text,
                 css_classes=["dim-label", "caption"],
-                halign=Gtk.Align.CENTER
+                halign=Gtk.Align.CENTER,
             )
 
             self.image_widget.append(image_widget)
             self.image_widget.append(info_label)
-            
+
             self.image_loaded = True
 
         except Exception as e:
@@ -385,31 +386,28 @@ class NotificationRow(Gtk.ListBoxRow):
         # Clear loading placeholder
         while self.image_widget.get_first_child():
             self.image_widget.remove(self.image_widget.get_first_child())
-        
+
         error_icon = Gtk.Image(
-            icon_name="image-missing-symbolic",
-            pixel_size=48,
-            css_classes=["dim-label"]
+            icon_name="image-missing-symbolic", pixel_size=48, css_classes=["dim-label"]
         )
         error_label = Gtk.Label(
-            label="Failed to load image",
-            css_classes=["dim-label", "caption"]
+            label="Failed to load image", css_classes=["dim-label", "caption"]
         )
-        
+
         self.image_widget.append(error_icon)
         self.image_widget.append(error_label)
         print(f"Error loading notification image: {error_msg}")
-        
+
         return GLib.SOURCE_REMOVE
 
     def format_timestamp(self):
-        ts_str = self.notification.get('timestamp', '')
+        ts_str = self.notification.get("timestamp", "")
         if not ts_str:
             return "just now"
 
         try:
             try:
-                ts = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+                ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
             except ValueError:
                 ts = datetime.fromisoformat(ts_str)
 
@@ -425,11 +423,11 @@ class NotificationRow(Gtk.ListBoxRow):
             elif seconds < 3600:
                 return f"{int(seconds // 60)}m ago"
             elif diff.days == 0:
-                return ts.strftime('%H:%M')
+                return ts.strftime("%H:%M")
             elif diff.days == 1:
                 return "yesterday"
             else:
-                return ts.strftime('%b %d')
+                return ts.strftime("%b %d")
         except (ValueError, TypeError) as e:
             print(f"Could not parse timestamp '{ts_str}': {e}")
             return "unknown"
@@ -446,7 +444,7 @@ class NotificationRow(Gtk.ListBoxRow):
             if self.expand_icon:
                 self.expand_icon.set_from_icon_name("pan-up-symbolic")
             self.add_css_class("expanded")
-            
+
             # Load image when expanding
             GLib.timeout_add(100, self.load_notification_image_async)
         else:
@@ -456,35 +454,50 @@ class NotificationRow(Gtk.ListBoxRow):
 
     def on_copy_text_clicked(self, button):
         """Copy notification text to clipboard"""
-        body_text = self.notification.get('body', '').strip()
+        body_text = self.notification.get("body", "").strip()
         if body_text:
             clipboard = Gdk.Display.get_default().get_clipboard()
             clipboard.set(body_text)
-            
+
             # Visual feedback
             original_label = button.get_label()
             button.set_label("Copied!")
             button.set_sensitive(False)
-            
+
             def reset_button():
                 button.set_label(original_label)
                 button.set_sensitive(True)
                 return False
-            
+
             GLib.timeout_add(1500, reset_button)
-            
+
             # Show toast if available
-            if hasattr(self.parent_widget, 'show_toast'):
+            if hasattr(self.parent_widget, "show_toast"):
                 self.parent_widget.show_toast("Copied to clipboard!")
 
     def on_open_image_clicked(self, button):
         """Open image in default application"""
-        icon_path = self.notification.get('icon', '')
+        icon_path = self.notification.get("icon", "")
         if icon_path and os.path.exists(icon_path):
             try:
-                subprocess.run(['xdg-open', icon_path], check=False)
+                subprocess.run(["xdg-open", icon_path], check=False)
             except Exception as e:
                 print(f"Error opening image: {e}")
+
+    def calculate_char_limit(self):
+        try:
+            context = self.get_pango_context()
+            metrics = context.get_metrics(context.get_font_description())
+            avg_char_width = metrics.get_approximate_char_width()
+            char_width_pixels = avg_char_width / Pango.SCALE
+            available_width = 500
+            return (
+                int(available_width / char_width_pixels)
+                if char_width_pixels > 0
+                else 60
+            )
+        except:
+            return 60
 
     def cleanup(self):
         """Clean up resources when row is removed"""
@@ -499,7 +512,9 @@ class NotificationsWidget(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
 
         self.toast_overlay = toast_overlay
-        self.notifications_file = os.path.expanduser("~/.local/share/dunst/notifications.json")
+        self.notifications_file = os.path.expanduser(
+            "~/.local/share/dunst/notifications.json"
+        )
         self.all_notifications = []
         self.visible_rows = []  # Track currently visible rows
 
@@ -534,10 +549,10 @@ class NotificationsWidget(Gtk.Box):
             return
         self.is_active = False
         print("NotificationsWidget Deactivated")
-        
+
         # Clean up visible rows
         self.cleanup_visible_rows()
-        
+
         if self.file_monitor:
             self.file_monitor.cancel()
             self.file_monitor = None
@@ -549,41 +564,37 @@ class NotificationsWidget(Gtk.Box):
     def cleanup_visible_rows(self):
         """Clean up resources from currently visible rows"""
         for row in self.visible_rows:
-            if hasattr(row, 'cleanup'):
+            if hasattr(row, "cleanup"):
                 row.cleanup()
         self.visible_rows.clear()
 
     def create_ui(self):
         # Header
         header_box = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL, 
+            orientation=Gtk.Orientation.HORIZONTAL,
             spacing=12,
-            margin_top=16, 
-            margin_bottom=12, 
-            margin_start=20, 
-            margin_end=20
+            margin_top=16,
+            margin_bottom=12,
+            margin_start=20,
+            margin_end=20,
         )
 
         title_label = Gtk.Label(
-            label="Notifications", 
-            halign=Gtk.Align.START, 
-            css_classes=["title-large"]
+            label="Notifications", halign=Gtk.Align.START, css_classes=["title-large"]
         )
         header_box.append(title_label)
 
         self.search_entry = Gtk.SearchEntry(
-            placeholder_text="Search notifications...", 
-            hexpand=True,
-            margin_start=12
+            placeholder_text="Search notifications...", hexpand=True, margin_start=12
         )
         self.search_entry.connect("search-changed", self.on_search_changed_debounced)
         header_box.append(self.search_entry)
 
         clear_button = Gtk.Button(
-            icon_name="edit-clear-all-symbolic", 
-            tooltip_text="Clear History", 
+            icon_name="edit-clear-all-symbolic",
+            tooltip_text="Clear History",
             css_classes=["circular"],
-            margin_start=12
+            margin_start=12,
         )
         clear_button.connect("clicked", self.on_clear_clicked)
         header_box.append(clear_button)
@@ -599,57 +610,50 @@ class NotificationsWidget(Gtk.Box):
 
         # Scrolled area for notifications - make it more generous
         scrolled_area = Gtk.ScrolledWindow(
-            vexpand=True, 
+            vexpand=True,
             css_classes=["invisible-scroll"],
             hscrollbar_policy=Gtk.PolicyType.NEVER,
             vscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
-            propagate_natural_height=True
+            propagate_natural_height=True,
         )
 
         self.listbox = Gtk.ListBox(
             selection_mode=Gtk.SelectionMode.SINGLE,
             css_classes=["notifications-list"],
-            margin_start=16, 
-            margin_end=16, 
-            margin_bottom=8
+            margin_start=16,
+            margin_end=16,
+            margin_bottom=8,
         )
         self.listbox.connect("row-activated", lambda lb, row: row.toggle_expanded())
 
         scrolled_area.set_child(self.listbox)
         self.content_stack.add_named(scrolled_area, "content")
-        
+
         # Footer for pagination
         footer_box = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL,
-            margin_start=20, 
-            margin_end=20, 
-            margin_bottom=16
+            margin_start=20,
+            margin_end=20,
+            margin_bottom=16,
         )
 
         # Stats section
-        stats_box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL,
-            spacing=2
-        )
-        self.stats_label = Gtk.Label(
-            halign=Gtk.Align.START, 
-            css_classes=["dim-label"]
-        )
+        stats_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        self.stats_label = Gtk.Label(halign=Gtk.Align.START, css_classes=["dim-label"])
         self.page_info_label = Gtk.Label(
-            halign=Gtk.Align.START, 
-            css_classes=["dim-label"]
+            halign=Gtk.Align.START, css_classes=["dim-label"]
         )
         stats_box.append(self.stats_label)
         stats_box.append(self.page_info_label)
         footer_box.append(stats_box)
 
         page_controls_box = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL, 
+            orientation=Gtk.Orientation.HORIZONTAL,
             spacing=6,
-            halign=Gtk.Align.END, 
-            hexpand=True
+            halign=Gtk.Align.END,
+            hexpand=True,
         )
-        
+
         self.prev_button = Gtk.Button.new_from_icon_name("go-previous-symbolic")
         self.prev_button.set_tooltip_text("Previous page")
         self.prev_button.connect("clicked", self.on_prev_page_clicked)
@@ -687,13 +691,19 @@ class NotificationsWidget(Gtk.Box):
         self.add_controller(win_key_controller)
 
     def on_win_key_pressed(self, controller, keyval, keycode, state):
-        if self.search_entry.has_focus(): 
+        if self.search_entry.has_focus():
             return False
-        
-        if keyval in (Gdk.KEY_Left, Gdk.KEY_Page_Up) and self.prev_button.get_sensitive():
+
+        if (
+            keyval in (Gdk.KEY_Left, Gdk.KEY_Page_Up)
+            and self.prev_button.get_sensitive()
+        ):
             self.on_prev_page_clicked(None)
             return True
-        elif keyval in (Gdk.KEY_Right, Gdk.KEY_Page_Down) and self.next_button.get_sensitive():
+        elif (
+            keyval in (Gdk.KEY_Right, Gdk.KEY_Page_Down)
+            and self.next_button.get_sensitive()
+        ):
             self.on_next_page_clicked(None)
             return True
         elif keyval == Gdk.KEY_F5:
@@ -709,12 +719,15 @@ class NotificationsWidget(Gtk.Box):
             if not os.path.exists(notif_dir):
                 os.makedirs(notif_dir, exist_ok=True)
             if not os.path.exists(self.notifications_file):
-                with open(self.notifications_file, 'w') as f:
+                with open(self.notifications_file, "w") as f:
                     json.dump([], f)
 
             file = Gio.File.new_for_path(self.notifications_file)
             self.file_monitor = file.monitor_file(Gio.FileMonitorFlags.NONE, None)
-            self.file_monitor.connect("changed", lambda *args: GLib.timeout_add(500, self.reload_notifications))
+            self.file_monitor.connect(
+                "changed",
+                lambda *args: GLib.timeout_add(500, self.reload_notifications),
+            )
             print("File monitor started for notifications.")
         except Exception as e:
             print(f"Failed to set up file monitor: {e}")
@@ -733,12 +746,14 @@ class NotificationsWidget(Gtk.Box):
                     return GLib.SOURCE_REMOVE
 
                 self.last_mtime = current_mtime
-                with open(self.notifications_file, 'r') as f:
+                with open(self.notifications_file, "r") as f:
                     content = f.read()
                     self.all_notifications = json.loads(content) if content else []
 
-            self.all_notifications.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
-            
+            self.all_notifications.sort(
+                key=lambda x: x.get("timestamp", ""), reverse=True
+            )
+
             # Reset to first page on full reload
             self.current_page = 0
             self.filter_notifications()
@@ -749,7 +764,7 @@ class NotificationsWidget(Gtk.Box):
             self.filter_notifications()
 
         # Show content after loading
-        if hasattr(self, 'content_stack'):
+        if hasattr(self, "content_stack"):
             self.content_stack.set_visible_child_name("content")
 
         return GLib.SOURCE_REMOVE
@@ -760,15 +775,17 @@ class NotificationsWidget(Gtk.Box):
 
         search_lower = search_text.lower()
         content = (
-            notification.get('app_name', '') + ' ' +
-            notification.get('summary', '') + ' ' +
-            notification.get('body', '')
+            notification.get("app_name", "")
+            + " "
+            + notification.get("summary", "")
+            + " "
+            + notification.get("body", "")
         ).lower()
 
         return search_lower in content
 
     def on_search_changed_debounced(self, entry):
-        if self.search_timeout_id > 0: 
+        if self.search_timeout_id > 0:
             GLib.source_remove(self.search_timeout_id)
         self.search_timeout_id = GLib.timeout_add(300, self.on_search_changed)
 
@@ -786,12 +803,16 @@ class NotificationsWidget(Gtk.Box):
         if self.current_page < self.total_pages - 1:
             self.current_page += 1
             self.filter_notifications()
-            
+
     def filter_notifications(self):
         search_text = self.search_entry.get_text().strip()
 
         # Get filtered notifications
-        filtered_notifications = [n for n in self.all_notifications if self.notification_matches_search(n, search_text)]
+        filtered_notifications = [
+            n
+            for n in self.all_notifications
+            if self.notification_matches_search(n, search_text)
+        ]
         total_items = len(filtered_notifications)
 
         # Clean up previous visible rows
@@ -806,7 +827,9 @@ class NotificationsWidget(Gtk.Box):
         # Handle empty state
         if total_items == 0:
             if search_text:
-                self.show_placeholder(f"No results for '{search_text}'", "edit-find-symbolic")
+                self.show_placeholder(
+                    f"No results for '{search_text}'", "edit-find-symbolic"
+                )
             else:
                 self.show_placeholder("No notifications yet.", "notification-symbolic")
             self.update_page_controls(0)
@@ -815,15 +838,18 @@ class NotificationsWidget(Gtk.Box):
         # Calculate pagination
         self.total_pages = math.ceil(total_items / self.items_per_page)
         self.current_page = max(0, min(self.current_page, self.total_pages - 1))
-            
+
         start_index = self.current_page * self.items_per_page
         end_index = start_index + self.items_per_page
-        
+
         # Get notifications for current page only
         page_notifications = filtered_notifications[start_index:end_index]
 
         # Create rows only for current page
-        rows_for_current_page = [NotificationRow(n, self, search_text if search_text else None) for n in page_notifications]
+        rows_for_current_page = [
+            NotificationRow(n, self, search_text if search_text else None)
+            for n in page_notifications
+        ]
 
         # Add only current page rows to listbox and track them
         self.visible_rows = rows_for_current_page[:]
@@ -834,62 +860,59 @@ class NotificationsWidget(Gtk.Box):
 
     def update_page_controls(self, total_items):
         footer_box = self.stats_label.get_parent().get_parent()
-        
+
         if total_items == 0 or self.total_pages <= 1:
             footer_box.set_visible(False)
             return
-        
+
         footer_box.set_visible(True)
 
         # Update stats
-        self.stats_label.set_text(f"{total_items} notification{'s' if total_items != 1 else ''}")
-        
+        self.stats_label.set_text(
+            f"{total_items} notification{'s' if total_items != 1 else ''}"
+        )
+
         # Update page info
         page_str = f"Page {self.current_page + 1} of {self.total_pages}"
         self.page_info_label.set_text(page_str)
-        
+
         # Update button states
         self.prev_button.set_sensitive(self.current_page > 0)
         self.next_button.set_sensitive(self.current_page < self.total_pages - 1)
-        
+
     def show_placeholder(self, text, icon_name):
         placeholder_box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, 
+            orientation=Gtk.Orientation.VERTICAL,
             spacing=12,
-            margin_top=40, 
+            margin_top=40,
             margin_bottom=40,
             vexpand=True,
             hexpand=True,
             halign=Gtk.Align.CENTER,
-            valign=Gtk.Align.CENTER
+            valign=Gtk.Align.CENTER,
         )
-        
+
         icon = Gtk.Image.new_from_icon_name(icon_name)
         icon.set_pixel_size(48)
         icon.add_css_class("dim-label")
-        
+
         label = Gtk.Label(
-            label=text, 
-            css_classes=["dim-label"],
-            justify=Gtk.Justification.CENTER
+            label=text, css_classes=["dim-label"], justify=Gtk.Justification.CENTER
         )
-        
+
         placeholder_box.append(icon)
         placeholder_box.append(label)
-        
-        placeholder_row = Gtk.ListBoxRow(
-            selectable=False,
-            activatable=False
-        )
+
+        placeholder_row = Gtk.ListBoxRow(selectable=False, activatable=False)
         placeholder_row.set_child(placeholder_box)
-        
+
         self.listbox.append(placeholder_row)
 
     def on_clear_clicked(self, button):
         dialog = Adw.MessageDialog.new(
-            self.get_root(), 
+            self.get_root(),
             "Clear Notification History?",
-            "This will permanently delete all notification history."
+            "This will permanently delete all notification history.",
         )
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("clear", "Clear All")
@@ -900,12 +923,14 @@ class NotificationsWidget(Gtk.Box):
     def on_clear_dialog_response(self, dialog, response):
         if response == "clear":
             try:
-                with open(self.notifications_file, 'w') as f:
+                with open(self.notifications_file, "w") as f:
                     json.dump([], f)
 
                 images_dir = os.path.expanduser("~/.local/share/dunst/images")
                 if os.path.exists(images_dir):
-                    subprocess.run(['rm', '-rf', f'{images_dir}/*'], shell=True, check=False)
+                    subprocess.run(
+                        ["rm", "-rf", f"{images_dir}/*"], shell=True, check=False
+                    )
 
                 self.search_entry.set_text("")
                 print("Notification history cleared.")
@@ -915,7 +940,7 @@ class NotificationsWidget(Gtk.Box):
             except Exception as e:
                 print(f"Error clearing notifications: {e}")
                 self.show_toast("Error: Failed to clear history.")
-        
+
         dialog.close()
 
     def show_toast(self, text):
