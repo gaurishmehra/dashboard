@@ -8,17 +8,35 @@ import threading
 from datetime import datetime, timedelta
 import warnings
 import traceback
+from app_logging import module_print
+from ui_helpers import build_status_widget
+
+print = module_print(__name__)
 
 # Lazy import for requests - deferred to first use to speed up module load
 _requests = None
+_requests_session = None
 def _get_requests():
     global _requests
     if _requests is None:
-        import requests
-        _requests = requests
-    return _requests
+        try:
+            import requests
+            _requests = requests
+        except ImportError:
+            _requests = False
+    return _requests if _requests else None
 
-warnings.filterwarnings("ignore")
+def _get_requests_session():
+    global _requests_session
+    requests = _get_requests()
+    if not requests:
+        return None
+    if _requests_session is None:
+        _requests_session = requests.Session()
+    return _requests_session
+
+# Only suppress specific known-benign warnings, not everything
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="gi")
 
 class WeatherWidget(Gtk.Box):
     # Cache file path for persistent storage
@@ -35,6 +53,7 @@ class WeatherWidget(Gtk.Box):
         self.update_timeout_id = None
         self._has_cached_data = False
         self._is_loading = False
+        self._last_render_signature = None
         
         self.load_config()
         self.load_cache_from_file()  # Load cache on startup
@@ -69,7 +88,7 @@ class WeatherWidget(Gtk.Box):
                 'air_quality_data': self.air_quality_data
             }
             with open(self.CACHE_FILE, 'w') as f:
-                json.dump(cache_data, f, indent=2)
+                json.dump(cache_data, f)
             print("Weather cache saved to file")
         except IOError as e:
             print(f"Error saving weather cache: {e}")
@@ -176,7 +195,7 @@ class WeatherWidget(Gtk.Box):
         except Exception as e:
             print(f"Error clearing content box: {e}")
         
-        if not self.latitude or not self.longitude:
+        if self.latitude is None or self.longitude is None:
             self.show_error("Configuration Error", "Please set LATITUDE and LONGITUDE in .env file")
             return
         
@@ -202,13 +221,11 @@ class WeatherWidget(Gtk.Box):
                 self.content_box.remove(child)
         except:
             pass
-        loading_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
-                              halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER,
-                              margin_top=50, margin_bottom=50)
-        spinner = Gtk.Spinner(spinning=True, width_request=32, height_request=32)
-        loading_label = Gtk.Label(label="Loading weather data...", css_classes=["dim-label"])
-        loading_box.append(spinner)
-        loading_box.append(loading_label)
+        loading_box = build_status_widget(
+            title="Loading Weather",
+            subtitle="Fetching forecast and local conditions...",
+            spinner=True,
+        )
         self.content_box.append(loading_box)
     
     def show_error(self, title, message):
@@ -217,16 +234,11 @@ class WeatherWidget(Gtk.Box):
                 self.content_box.remove(child)
         except:
             pass
-        error_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
-                            halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER,
-                            margin_top=50, margin_bottom=50)
-        error_icon = Gtk.Image(icon_name="dialog-error-symbolic")
-        error_icon.set_pixel_size(48)
-        error_title = Gtk.Label(label=title, css_classes=["title-label"])
-        error_message = Gtk.Label(label=message, css_classes=["dim-label"])
-        error_box.append(error_icon)
-        error_box.append(error_title)
-        error_box.append(error_message)
+        error_box = build_status_widget(
+            title=title,
+            subtitle=message,
+            icon_name="dialog-error-symbolic",
+        )
         self.content_box.append(error_box)
     
     def get_air_quality_description(self, aqi_value):
@@ -607,7 +619,7 @@ class WeatherWidget(Gtk.Box):
         return day_row
     
     def fetch_weather_data(self, show_spinner=True):
-        if not self.latitude or not self.longitude:
+        if self.latitude is None or self.longitude is None:
             GLib.idle_add(self.create_weather_ui)
             return GLib.SOURCE_REMOVE
         
@@ -643,10 +655,13 @@ class WeatherWidget(Gtk.Box):
                     f"&timezone=auto&forecast_days=7"
                 )
 
-                # Get requests module (lazy loaded)
-                requests = _get_requests()
+                # Get requests module/session (lazy loaded)
+                requests_mod = _get_requests()
+                if not requests_mod:
+                    raise RuntimeError("requests library is not installed")
+                session = _get_requests_session() or requests_mod
                 
-                weather_response = requests.get(weather_url, timeout=10)
+                weather_response = session.get(weather_url, timeout=10)
                 weather_response.raise_for_status()
                 
                 data = weather_response.json()
@@ -662,28 +677,28 @@ class WeatherWidget(Gtk.Box):
                         f"&timezone=auto"
                     )
                     
-                    air_response = requests.get(air_quality_url, timeout=5)
+                    air_response = session.get(air_quality_url, timeout=5)
                     if air_response.status_code == 200:
                         self.air_quality_data = air_response.json()
                         print("Air quality data fetched successfully")
                     else:
                         print(f"Air quality API returned status {air_response.status_code}")
                         self.air_quality_data = {}
-                except requests.RequestException as e:
+                except Exception as e:
                     print(f"Failed to fetch air quality data: {e}")
                     self.air_quality_data = {}
                 
                 # Fetch location in parallel but don't block weather update
                 try:
                     reverse_geo_url = f"https://api.bigdatacloud.net/data/reverse-geocode-client?latitude={self.latitude}&longitude={self.longitude}&localityLanguage=en"
-                    geo_response = requests.get(reverse_geo_url, timeout=5)
+                    geo_response = session.get(reverse_geo_url, timeout=5)
                     if geo_response.status_code == 200:
                         geo_data = geo_response.json()
                         city = geo_data.get('city') or geo_data.get('locality') or geo_data.get('principalSubdivision')
                         country = geo_data.get('countryName', '')
                         if city: 
                             self.location_data = {'city': f"{city}, {country}" if country else city}
-                except requests.RequestException:
+                except Exception:
                     timezone = data.get('timezone', '')
                     city_name = timezone.split('/')[-1].replace('_', ' ') if '/' in timezone else 'Unknown Location'
                     self.location_data = {'city': city_name}
@@ -696,25 +711,24 @@ class WeatherWidget(Gtk.Box):
                 GLib.idle_add(self.set_refresh_button_loading, False)
                 GLib.idle_add(self.update_location_and_weather)
             
-            except requests.exceptions.HTTPError as e:
-                print(f"API Error fetching weather data: {e}")
-                self._is_loading = False
-                GLib.idle_add(self.set_refresh_button_loading, False)
-                # Only show error if no cached data to fall back on
-                if not self._has_cached_data:
-                    GLib.idle_add(self.show_error, "API Error", "The weather service returned an error.")
-            except requests.exceptions.RequestException as e:
-                print(f"Network Error fetching weather data: {e}")
-                self._is_loading = False
-                GLib.idle_add(self.set_refresh_button_loading, False)
-                # Only show error if no cached data to fall back on
-                if not self._has_cached_data:
-                    GLib.idle_add(self.show_error, "Network Error", "Failed to connect to weather service.")
             except Exception as e:
+                self._is_loading = False
+                GLib.idle_add(self.set_refresh_button_loading, False)
+                # Classify the error for user-facing messages
+                requests_mod = _get_requests()
+                if requests_mod:
+                    if isinstance(e, requests_mod.exceptions.HTTPError):
+                        print(f"API Error fetching weather data: {e}")
+                        if not self._has_cached_data:
+                            GLib.idle_add(self.show_error, "API Error", "The weather service returned an error.")
+                        return
+                    elif isinstance(e, requests_mod.exceptions.RequestException):
+                        print(f"Network Error fetching weather data: {e}")
+                        if not self._has_cached_data:
+                            GLib.idle_add(self.show_error, "Network Error", "Failed to connect to weather service.")
+                        return
                 print(f"An unexpected error occurred: {e}")
                 traceback.print_exc()
-                self._is_loading = False
-                GLib.idle_add(self.set_refresh_button_loading, False)
                 if not self._has_cached_data:
                     GLib.idle_add(self.show_error, "Application Error", "An unexpected error occurred.")
 
@@ -725,10 +739,33 @@ class WeatherWidget(Gtk.Box):
     def update_location_and_weather(self):
         try:
             city_name = self.location_data.get('city', 'Unknown Location')
+            signature = self._get_render_signature(city_name)
+            if signature == self._last_render_signature:
+                return
+            self._last_render_signature = signature
             self.location_label.set_text(city_name)
             self.create_weather_ui()
         except Exception as e:
             print(f"Error updating location and weather: {e}")
+
+    def _get_render_signature(self, city_name):
+        current = self.weather_data.get('current', {})
+        hourly = self.forecast_data.get('hourly', {})
+        daily = self.forecast_data.get('daily', {})
+        return (
+            city_name,
+            current.get('time'),
+            current.get('temperature_2m'),
+            current.get('weather_code'),
+            current.get('is_day'),
+            tuple(hourly.get('time', [])[:24]),
+            tuple(hourly.get('temperature_2m', [])[:24]),
+            tuple(hourly.get('weather_code', [])[:24]),
+            tuple(daily.get('time', [])[:7]),
+            tuple(daily.get('temperature_2m_max', [])[:7]),
+            tuple(daily.get('temperature_2m_min', [])[:7]),
+            tuple(daily.get('weather_code', [])[:7]),
+        )
     
     def get_weather_icon(self, weather_code, is_hourly=False):
         # For hourly forecast, we can't reliably know if it's day or night.

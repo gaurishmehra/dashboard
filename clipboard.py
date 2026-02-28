@@ -8,6 +8,10 @@ import os
 import math
 import re
 import threading
+from app_logging import module_print
+from ui_helpers import REVEALER_TRANSITION_MS, configure_stack_transition
+
+print = module_print(__name__)
 
 # A Note on Dependencies:
 # This widget requires 'cliphist' and 'wl-clipboard' to be installed on your system.
@@ -36,17 +40,16 @@ def highlight_text(text, search_term):
 def get_full_clipboard_content(item_text):
     """Decodes the full clipboard content from a cliphist list item."""
     try:
-        process = subprocess.Popen(
+        result = subprocess.run(
             ["cliphist", "decode"],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            input=item_text.encode("utf-8"),
+            capture_output=True,
+            timeout=3,
         )
-        stdout, stderr = process.communicate(input=item_text.encode("utf-8"))
-        if process.returncode != 0:
-            print(f"cliphist decode error: {stderr.decode()}")
+        if result.returncode != 0:
+            print(f"cliphist decode error: {result.stderr.decode(errors='ignore')}")
             return None
-        return stdout.decode("utf-8", errors="ignore")
+        return result.stdout.decode("utf-8", errors="ignore")
     except Exception as e:
         print(f"Error getting full content: {e}")
         return None
@@ -55,17 +58,16 @@ def get_full_clipboard_content(item_text):
 def get_clipboard_bytes(item_text):
     """Decodes the full clipboard bytes from a cliphist list item."""
     try:
-        process = subprocess.Popen(
+        result = subprocess.run(
             ["cliphist", "decode"],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            input=item_text.encode("utf-8"),
+            capture_output=True,
+            timeout=3,
         )
-        stdout, stderr = process.communicate(input=item_text.encode("utf-8"))
-        if process.returncode != 0:
-            print(f"cliphist decode error: {stderr.decode()}")
+        if result.returncode != 0:
+            print(f"cliphist decode error: {result.stderr.decode(errors='ignore')}")
             return None
-        return stdout
+        return result.stdout
     except Exception as e:
         print(f"Error getting full bytes: {e}")
         return None
@@ -173,7 +175,7 @@ class ClipboardRow(Gtk.ListBoxRow):
     def create_expandable_body_placeholder(self):
         self.body_revealer = Gtk.Revealer(
             transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN,
-            transition_duration=150,
+            transition_duration=REVEALER_TRANSITION_MS,
             reveal_child=False,
         )
         self.main_box.append(self.body_revealer)
@@ -440,16 +442,14 @@ class ClipboardRow(Gtk.ListBoxRow):
 
     def on_copy_clicked(self, button):
         try:
-            process = subprocess.Popen(
+            decode_result = subprocess.run(
                 ["cliphist", "decode"],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                input=self.item_text.encode("utf-8"),
+                capture_output=True,
+                timeout=3,
             )
-            stdout, _ = process.communicate(input=self.item_text.encode("utf-8"))
-            if process.returncode == 0:
-                copy_process = subprocess.Popen(["wl-copy"], stdin=subprocess.PIPE)
-                copy_process.communicate(input=stdout)
+            if decode_result.returncode == 0:
+                subprocess.run(["wl-copy"], input=decode_result.stdout, timeout=3)
                 self.parent_widget.show_toast("Copied to clipboard!")
         except Exception as e:
             print(f"Error copying item: {e}")
@@ -462,7 +462,10 @@ class ClipboardRow(Gtk.ListBoxRow):
     def perform_delete(self):
         try:
             subprocess.run(
-                ["cliphist", "delete"], input=self.item_text.encode("utf-8"), check=True
+                ["cliphist", "delete"],
+                input=self.item_text.encode("utf-8"),
+                check=True,
+                timeout=3,
             )
         except Exception as e:
             print(f"Error deleting item: {e}")
@@ -591,8 +594,8 @@ class ClipboardWidget(Gtk.Box):
         header_box.append(clear_button)
 
         self.content_stack = Gtk.Stack()
-        self.content_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
         self.content_stack.set_vexpand(True)
+        configure_stack_transition(self.content_stack)
 
         loading_page = self.create_loading_page()
         self.content_stack.add_named(loading_page, "loading")
@@ -669,7 +672,11 @@ class ClipboardWidget(Gtk.Box):
         error = None
         try:
             result = subprocess.run(
-                ["cliphist", "list"], capture_output=True, text=True, check=True
+                ["cliphist", "list"],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=3,
             )
             new_items = (
                 result.stdout.strip().split("\n") if result.stdout.strip() else []
@@ -784,21 +791,24 @@ class ClipboardWidget(Gtk.Box):
         return term_lower in full.lower()
 
     def start_incremental_search_until(self, target_count):
-        """Incrementally scan items until we have target_count results or reach end."""
+        """Incrementally scan items until we have target_count results or reach end.
+        
+        Scanning (which may call blocking `cliphist decode`) runs in a background
+        thread so the GTK main loop is never blocked.
+        """
         self._cancel_search_scan()
         if not self.search_state:
             return
 
-        def step():
-            state = self.search_state
+        state = self.search_state
+
+        def _scan_worker():
+            """Background thread: scan items and collect results."""
             type_filtered = state["type_filtered"]
             term_lower = state["term"].lower()
 
-            # Process a small chunk per idle to keep UI responsive
-            budget = 24
             while (
-                budget > 0
-                and state["scan_index"] < len(type_filtered)
+                state["scan_index"] < len(type_filtered)
                 and len(state["results"]) < target_count
             ):
                 item = type_filtered[state["scan_index"]]
@@ -806,28 +816,18 @@ class ClipboardWidget(Gtk.Box):
 
                 if self.item_matches_search_quick(item, term_lower):
                     state["results"].append(item)
-                else:
-                    # Only decode if needed, and only for text
-                    if not is_image_item(item) and self.item_matches_search_full(
-                        item, term_lower
-                    ):
-                        state["results"].append(item)
+                elif not is_image_item(item) and self.item_matches_search_full(
+                    item, term_lower
+                ):
+                    state["results"].append(item)
 
-                budget -= 1
+            state["fully_scanned"] = state["scan_index"] >= len(type_filtered)
+            state["scan_source_id"] = 0
+            # Post UI update back to the main thread
+            GLib.idle_add(self.render_current_page)
 
-            if len(state["results"]) >= target_count or state["scan_index"] >= len(
-                type_filtered
-            ):
-                # Done with this page's quota or exhausted the list
-                state["fully_scanned"] = state["scan_index"] >= len(type_filtered)
-                state["scan_source_id"] = 0
-                self.render_current_page()
-                return GLib.SOURCE_REMOVE
-
-            # Keep scanning on next idle
-            return GLib.SOURCE_CONTINUE
-
-        self.search_state["scan_source_id"] = GLib.idle_add(step)
+        thread = threading.Thread(target=_scan_worker, daemon=True)
+        thread.start()
 
     # ---------- End incremental search helpers ----------
 
@@ -1062,7 +1062,7 @@ class ClipboardWidget(Gtk.Box):
     def on_clear_dialog_response(self, dialog, response):
         if response == "clear":
             try:
-                subprocess.run(["cliphist", "wipe"], check=True)
+                subprocess.run(["cliphist", "wipe"], check=True, timeout=3)
                 self.full_content_cache.clear()
                 self.load_history(is_initial_load=True)  # Reload with spinner
                 self.show_toast("Clipboard history cleared.")

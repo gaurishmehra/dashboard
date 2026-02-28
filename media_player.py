@@ -14,6 +14,9 @@ import warnings
 import hashlib
 import shlex
 import time
+from app_logging import module_print
+
+print = module_print(__name__)
 
 # Lazy import for requests - deferred to first use to speed up module load
 _requests = None
@@ -369,8 +372,10 @@ class MediaPlayerWidget(Gtk.Box):
     # background thread for sending commands.
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=15)
+        self.set_halign(Gtk.Align.CENTER)
         self.set_valign(Gtk.Align.CENTER)
-        self.set_vexpand(True)
+        self.set_hexpand(True)
+        self.set_vexpand(False)
 
         self.current_player = None
         self.players = []
@@ -381,9 +386,12 @@ class MediaPlayerWidget(Gtk.Box):
 
         self._is_seeking = False
         self._is_volume_changing = False
+        self._volume_timeout_id = None
+        self._pending_volume_value = None
 
         self.is_active = False
         self.update_timer_id = None
+        self._player_refresh_tick = 0
 
         self.command_queue = queue.Queue()
         self.command_thread = threading.Thread(target=self._command_worker, daemon=True)
@@ -441,6 +449,10 @@ class MediaPlayerWidget(Gtk.Box):
         if self.update_timer_id:
             GLib.source_remove(self.update_timer_id)
             self.update_timer_id = None
+        if self._volume_timeout_id:
+            GLib.source_remove(self._volume_timeout_id)
+            self._volume_timeout_id = None
+        self._pending_volume_value = None
 
     # Builds all the visual components of the widget (labels, buttons,
     # album art, etc.) and arranges them.
@@ -449,12 +461,16 @@ class MediaPlayerWidget(Gtk.Box):
         self.set_margin_bottom(20)
         self.set_margin_start(20)
         self.set_margin_end(20)
+        self.set_halign(Gtk.Align.CENTER)
         self.set_valign(Gtk.Align.CENTER)
-        self.set_vexpand(True)
+        self.set_hexpand(True)
+        self.set_vexpand(False)
 
         self.players_box = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL, spacing=8, halign=Gtk.Align.CENTER
         )
+        # Reserve row height so initial render doesn't jump when players appear.
+        self.players_box.set_size_request(-1, 48)
 
         art_container = Gtk.Overlay(halign=Gtk.Align.CENTER)
         self.progress_widget = CircularProgressWidget()
@@ -571,9 +587,11 @@ class MediaPlayerWidget(Gtk.Box):
     # to be executed by the background worker.
     def _queue_command(self, command):
         if self.current_player:
-            # Quote player name to handle names with special characters
-            player = shlex.quote(self.current_player)
-            self.command_queue.put(f"playerctl -p {player} {command}")
+            if isinstance(command, str):
+                command_parts = shlex.split(command)
+            else:
+                command_parts = [str(part) for part in command]
+            self.command_queue.put(["playerctl", "-p", self.current_player] + command_parts)
 
     # Handles clicks on the play/pause button. It instantly updates the
     # icon for responsiveness and then queues the actual command.
@@ -591,8 +609,18 @@ class MediaPlayerWidget(Gtk.Box):
     def on_volume_changed(self, scale):
         if self._is_volume_changing:
             return
-        volume = scale.get_value()
-        self._queue_command(f"volume {volume}")
+        self._pending_volume_value = scale.get_value()
+        if self._volume_timeout_id:
+            GLib.source_remove(self._volume_timeout_id)
+        self._volume_timeout_id = GLib.timeout_add(150, self._flush_volume_change)
+
+    def _flush_volume_change(self):
+        self._volume_timeout_id = None
+        if self._pending_volume_value is None:
+            return GLib.SOURCE_REMOVE
+        self._queue_command(["volume", f"{self._pending_volume_value:.3f}"])
+        self._pending_volume_value = None
+        return GLib.SOURCE_REMOVE
 
     # Handles the user clicking on a different player icon. It updates the
     # state and saves the new choice.
@@ -611,16 +639,24 @@ class MediaPlayerWidget(Gtk.Box):
         if not self.is_active:
             return GLib.SOURCE_REMOVE
 
-        players_output = self._run_sync_command(["playerctl", "-l"])
-        new_players = [
-            p
-            for p in (players_output.split("\n") if players_output else [])
-            if "firefox" not in p.lower()
-        ]
+        self._player_refresh_tick += 1
+        should_refresh_players = (
+            force_update
+            or not self.players
+            or not self.current_player
+            or self._player_refresh_tick % 5 == 0
+        )
+        if should_refresh_players:
+            players_output = self._run_sync_command(["playerctl", "-l"])
+            new_players = [
+                p
+                for p in (players_output.split("\n") if players_output else [])
+                if "firefox" not in p.lower()
+            ]
 
-        if new_players != self.players or force_update:
-            self.players = new_players
-            self._rebuild_player_buttons()
+            if new_players != self.players or force_update:
+                self.players = new_players
+                self._rebuild_player_buttons()
 
         target_player = None
         if (
@@ -638,6 +674,7 @@ class MediaPlayerWidget(Gtk.Box):
             self._last_known_art_url = None
             self._last_known_title = None  # Reset on player change
             self._is_seeking = False
+            self._player_refresh_tick = 0
             self.update_player_buttons_state()
 
         if not self.current_player:
@@ -748,6 +785,10 @@ class MediaPlayerWidget(Gtk.Box):
         except Exception as e:
             print(f"Error parsing metadata ('{metadata_output}'): {e}")
             self._reset_ui_to_default()
+            # Rearm the timer so polling doesn't die permanently after a parse hiccup
+            if self.update_timer_id:
+                GLib.source_remove(self.update_timer_id)
+            self.update_timer_id = GLib.timeout_add(5000, self.update_all_info)
 
         return GLib.SOURCE_REMOVE  # We set up a new timer, so remove this one
 
@@ -775,7 +816,7 @@ class MediaPlayerWidget(Gtk.Box):
         )
 
         target_position_for_playerctl = total_seconds * progress
-        self._queue_command(f"position {target_position_for_playerctl}")
+        self._queue_command(["position", f"{target_position_for_playerctl}"])
 
         GLib.timeout_add(1000, lambda: setattr(self, "_is_seeking", False))
 

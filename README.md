@@ -197,6 +197,15 @@ Result is cached in `~/.cache/dashboard_gpu_renderer` so detection only runs onc
 python -c "import gi; gi.require_version('Gtk', '4.0'); gi.require_version('Adw', '1')"
 ```
 
+### Enable debug logs
+```bash
+# Quiet by default. Enable detailed logs only when debugging.
+DASHBOARD_DEBUG=1 python dashboard.py
+
+# Or set an explicit level (DEBUG, INFO, WARNING, ERROR)
+DASHBOARD_LOG_LEVEL=DEBUG python dashboard.py
+```
+
 ### Notifications not showing
 ```bash
 # Make sure dunst is running and dunst_log.py is active

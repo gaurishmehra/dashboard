@@ -5,11 +5,16 @@ gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw, GLib, Pango, Gio, Gdk
 import json
 import os
+import shutil
 from datetime import datetime, timezone
 import warnings
 import subprocess
 import math
 import threading
+from app_logging import module_print
+from ui_helpers import REVEALER_TRANSITION_MS, configure_stack_transition
+
+print = module_print(__name__)
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -133,7 +138,7 @@ class NotificationRow(Gtk.ListBoxRow):
         # Create revealer for smooth animation
         self.body_revealer = Gtk.Revealer(
             transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN,
-            transition_duration=150,
+            transition_duration=REVEALER_TRANSITION_MS,
             reveal_child=False,
         )
         self.main_box.append(self.body_revealer)
@@ -322,17 +327,23 @@ class NotificationRow(Gtk.ListBoxRow):
         thread.start()
 
     def load_image_worker(self):
-        """Worker thread for loading image"""
+        """Worker thread for loading image — only validates path, texture created on main thread."""
         icon_path = self.notification.get("icon", "")
         if not icon_path or not os.path.exists(icon_path):
             GLib.idle_add(self.update_image_ui_error, "File not found")
             return
 
+        # Pass the path to the main thread for GDK texture creation
+        GLib.idle_add(self._create_texture_on_main_thread, icon_path)
+
+    def _create_texture_on_main_thread(self, icon_path):
+        """Create GDK texture on the main thread where it's safe."""
         try:
             texture = Gdk.Texture.new_from_filename(icon_path)
-            GLib.idle_add(self.update_image_ui_success, texture)
+            self.update_image_ui_success(texture)
         except Exception as e:
-            GLib.idle_add(self.update_image_ui_error, str(e))
+            self.update_image_ui_error(str(e))
+        return GLib.SOURCE_REMOVE
 
     def update_image_ui_success(self, texture):
         """Update image UI with loaded texture"""
@@ -521,6 +532,7 @@ class NotificationsWidget(Gtk.Box):
         self.file_monitor = None
         self.last_mtime = 0
         self.is_active = False
+        self.reload_debounce_id = 0
 
         # Pagination state
         self.current_page = 0
@@ -560,6 +572,26 @@ class NotificationsWidget(Gtk.Box):
         if self.search_timeout_id > 0:
             GLib.source_remove(self.search_timeout_id)
             self.search_timeout_id = 0
+        if self.reload_debounce_id > 0:
+            GLib.source_remove(self.reload_debounce_id)
+            self.reload_debounce_id = 0
+
+    def _clear_notification_images(self):
+        """Remove cached notification images without invoking a shell."""
+        images_dir = os.path.expanduser("~/.local/share/dunst/images")
+        if not os.path.isdir(images_dir):
+            return
+
+        for name in os.listdir(images_dir):
+            path = os.path.join(images_dir, name)
+            try:
+                if os.path.isdir(path) and not os.path.islink(path):
+                    shutil.rmtree(path, ignore_errors=True)
+                else:
+                    os.unlink(path)
+            except OSError:
+                # Best-effort cleanup; history is still cleared even if one file fails.
+                pass
 
     def cleanup_visible_rows(self):
         """Clean up resources from currently visible rows"""
@@ -601,8 +633,8 @@ class NotificationsWidget(Gtk.Box):
 
         # Content stack for loading/content states
         self.content_stack = Gtk.Stack()
-        self.content_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
         self.content_stack.set_vexpand(True)
+        configure_stack_transition(self.content_stack)
 
         # Loading page
         loading_page = self.create_loading_page()
@@ -724,13 +756,23 @@ class NotificationsWidget(Gtk.Box):
 
             file = Gio.File.new_for_path(self.notifications_file)
             self.file_monitor = file.monitor_file(Gio.FileMonitorFlags.NONE, None)
-            self.file_monitor.connect(
-                "changed",
-                lambda *args: GLib.timeout_add(500, self.reload_notifications),
-            )
+            self.file_monitor.connect("changed", self.on_notifications_file_changed)
             print("File monitor started for notifications.")
         except Exception as e:
             print(f"Failed to set up file monitor: {e}")
+
+    def on_notifications_file_changed(self, *args):
+        """Debounce file monitor events to avoid redundant reload bursts."""
+        if not self.is_active:
+            return
+        if self.reload_debounce_id > 0:
+            GLib.source_remove(self.reload_debounce_id)
+        self.reload_debounce_id = GLib.timeout_add(300, self._run_debounced_reload)
+
+    def _run_debounced_reload(self):
+        self.reload_debounce_id = 0
+        self.reload_notifications()
+        return GLib.SOURCE_REMOVE
 
     def reload_notifications(self):
         if not self.is_active:
@@ -926,11 +968,7 @@ class NotificationsWidget(Gtk.Box):
                 with open(self.notifications_file, "w") as f:
                     json.dump([], f)
 
-                images_dir = os.path.expanduser("~/.local/share/dunst/images")
-                if os.path.exists(images_dir):
-                    subprocess.run(
-                        ["rm", "-rf", f"{images_dir}/*"], shell=True, check=False
-                    )
+                self._clear_notification_images()
 
                 self.search_entry.set_text("")
                 print("Notification history cleared.")

@@ -66,8 +66,13 @@ import threading
 import concurrent.futures
 import subprocess
 import signal
+from app_logging import module_print
+from ui_helpers import STACK_TRANSITION_MS
 
-warnings.filterwarnings("ignore")
+print = module_print(__name__)
+
+# Only suppress specific known-benign warnings, not everything
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="gi")
 
 # Module-level ThreadPoolExecutor - reused across all async operations
 # This avoids the overhead of creating/destroying threads repeatedly
@@ -131,6 +136,7 @@ class Dashboard(Adw.ApplicationWindow):
         self.current_view_name = initial_view
         self.current_widget = None
         self.widgets = {}
+        self._pending_widget_loads = set()
 
         key_controller = Gtk.EventControllerKey()
         key_controller.connect("key-pressed", self.on_key_pressed)
@@ -240,7 +246,23 @@ class Dashboard(Adw.ApplicationWindow):
 
         self.content_stack = Gtk.Stack()
         self.content_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
-        self.content_stack.set_transition_duration(100)  # Faster transition
+        self.content_stack.set_transition_duration(STACK_TRANSITION_MS)
+
+        # Shared loading view for lazy-loaded tabs.
+        self._view_loading_name = "_view_loading"
+        self._view_loading_label = Gtk.Label(
+            label="Loading...", css_classes=["dim-label"], halign=Gtk.Align.CENTER
+        )
+        view_loading_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=12,
+            halign=Gtk.Align.CENTER,
+            valign=Gtk.Align.CENTER,
+        )
+        view_loading_spinner = Gtk.Spinner(spinning=True, width_request=28, height_request=28)
+        view_loading_box.append(view_loading_spinner)
+        view_loading_box.append(self._view_loading_label)
+        self.content_stack.add_named(view_loading_box, self._view_loading_name)
 
         leaflet.append(sidebar)
         leaflet.append(self.content_stack)
@@ -286,17 +308,12 @@ class Dashboard(Adw.ApplicationWindow):
             self._loading_box = loading_box
             self._widget_names = widget_names
 
-            # Poll for completion instead of blocking - this lets the spinner animate
-            def check_import_done():
-                future = self._import_futures.get(self.initial_view)
-                if future and future.done():
-                    # Import finished - now create widget
-                    self._finish_initial_widget_load()
-                    return GLib.SOURCE_REMOVE  # Stop polling
-                return GLib.SOURCE_CONTINUE  # Keep polling
-
-            # Check every 16ms (~60fps) - fast enough for responsive UI
-            GLib.timeout_add(16, check_import_done)
+            # Use a done callback instead of tight polling to avoid extra wakeups.
+            initial_future = self._import_futures.get(self.initial_view)
+            if initial_future:
+                initial_future.add_done_callback(
+                    lambda _future: GLib.idle_add(self._finish_initial_widget_load)
+                )
 
         except Exception as e:
             print(f"Error creating widgets: {e}")
@@ -342,45 +359,74 @@ class Dashboard(Adw.ApplicationWindow):
 
             self.update_sidebar_buttons()
 
-            # Create remaining widgets in background
+            # Warm remaining imports in background only. Widgets are created lazily
+            # when the user actually opens that view.
             remaining_names = [n for n in self._widget_names if n != self.initial_view]
-
-            def create_remaining():
-                for name in remaining_names:
-                    self._import_futures[name].result()
-                GLib.idle_add(self._create_remaining_widgets_on_main, remaining_names)
-
-            threading.Thread(target=create_remaining, daemon=True).start()
+            if remaining_names:
+                threading.Thread(
+                    target=self._warm_imports, args=(remaining_names,), daemon=True
+                ).start()
 
         except Exception as e:
             print(f"Error finishing widget load: {e}")
 
-    def _create_remaining_widgets_on_main(self, widget_names):
-        """Create remaining widgets on main thread (required by GTK)."""
+    def _warm_imports(self, widget_names):
+        """Warm module imports in background without constructing GTK widgets."""
+        for name in widget_names:
+            try:
+                future = self._import_futures.get(name)
+                if future:
+                    future.result()
+            except Exception as e:
+                print(f"Error importing widget '{name}': {e}")
+
+    def _create_widget_instance(self, view_name, widget_class):
+        """Create and add a widget to the stack on-demand."""
+        if view_name in self.widgets:
+            return self.widgets[view_name]
+
+        if view_name == "clipboard":
+            widget = widget_class(toast_overlay=self.toast_overlay)
+        else:
+            widget = widget_class()
+
+        self.widgets[view_name] = widget
+        if view_name == "media":
+            widget.set_halign(Gtk.Align.CENTER)
+            widget.set_valign(Gtk.Align.CENTER)
+            media_container = Gtk.Box(
+                orientation=Gtk.Orientation.VERTICAL,
+                halign=Gtk.Align.FILL,
+                valign=Gtk.Align.FILL,
+                hexpand=True,
+                vexpand=True,
+            )
+            media_container.append(widget)
+            self.content_stack.add_named(media_container, view_name)
+        else:
+            self.content_stack.add_named(widget, view_name)
+        return widget
+
+    def _on_view_import_ready(self, view_name):
+        """Finish creating a lazily-loaded widget after import completes."""
         try:
-            for name in widget_names:
-                widget_class = _widget_classes.get(name)
-                if widget_class:
-                    if name == "clipboard":
-                        self.widgets[name] = widget_class(
-                            toast_overlay=self.toast_overlay
-                        )
-                    else:
-                        self.widgets[name] = widget_class()
+            future = getattr(self, "_import_futures", {}).get(view_name)
+            widget_class = future.result() if future else _import_widget_class(view_name)
+            if not widget_class:
+                return GLib.SOURCE_REMOVE
 
-                    if name == "media":
-                        media_container = Gtk.Box(
-                            orientation=Gtk.Orientation.VERTICAL,
-                            valign=Gtk.Align.CENTER,
-                            vexpand=True,
-                        )
-                        media_container.append(self.widgets[name])
-                        self.content_stack.add_named(media_container, name)
-                    else:
-                        self.content_stack.add_named(self.widgets[name], name)
+            self._create_widget_instance(view_name, widget_class)
+            self._pending_widget_loads.discard(view_name)
+
+            # Only switch/activate if user still wants this view.
+            if self.current_view_name == view_name:
+                self.content_stack.set_visible_child_name(view_name)
+                self.current_widget = self.widgets.get(view_name)
+                if self.current_widget and hasattr(self.current_widget, "activate"):
+                    self.current_widget.activate()
         except Exception as e:
-            print(f"Error creating remaining widgets: {e}")
-
+            self._pending_widget_loads.discard(view_name)
+            print(f"Error finishing lazy view load '{view_name}': {e}")
         return GLib.SOURCE_REMOVE
 
     # This is the core logic for changing views. It deactivates the background tasks
@@ -391,41 +437,42 @@ class Dashboard(Adw.ApplicationWindow):
         if view_name == self.current_view_name:
             return
 
-        # Check if widget exists yet (might still be loading)
-        if view_name not in self.widgets:
-            # Widget not ready yet - create it now on-demand
-            widget_class = _widget_classes.get(view_name)
-            if not widget_class:
-                # Import not complete yet, do it now
-                widget_class = _import_widget_class(view_name)
-
-            if widget_class:
-                if view_name == "clipboard":
-                    self.widgets[view_name] = widget_class(
-                        toast_overlay=self.toast_overlay
-                    )
-                else:
-                    self.widgets[view_name] = widget_class()
-
-                if view_name == "media":
-                    media_container = Gtk.Box(
-                        orientation=Gtk.Orientation.VERTICAL,
-                        valign=Gtk.Align.CENTER,
-                        vexpand=True,
-                    )
-                    media_container.append(self.widgets[view_name])
-                    self.content_stack.add_named(media_container, view_name)
-                else:
-                    self.content_stack.add_named(self.widgets[view_name], view_name)
-
         try:
             if self.current_widget and hasattr(self.current_widget, "deactivate"):
                 self.current_widget.deactivate()
 
             self.current_view_name = view_name
-            self.content_stack.set_visible_child_name(view_name)
             self.update_sidebar_buttons()
 
+            # Check if widget exists yet (might still be loading/importing)
+            if view_name not in self.widgets:
+                widget_class = _widget_classes.get(view_name)
+                if widget_class:
+                    self._create_widget_instance(view_name, widget_class)
+                else:
+                    future = getattr(self, "_import_futures", {}).get(view_name)
+                    if future and not future.done():
+                        self._view_loading_label.set_text(
+                            f"Loading {view_name.title()}..."
+                        )
+                        self.content_stack.set_visible_child_name(self._view_loading_name)
+                        self.current_widget = None
+                        if view_name not in self._pending_widget_loads:
+                            self._pending_widget_loads.add(view_name)
+                            future.add_done_callback(
+                                lambda _f, name=view_name: GLib.idle_add(
+                                    self._on_view_import_ready, name
+                                )
+                            )
+                        return
+                    if future:
+                        widget_class = future.result()
+                    else:
+                        widget_class = _import_widget_class(view_name)
+                    if widget_class:
+                        self._create_widget_instance(view_name, widget_class)
+
+            self.content_stack.set_visible_child_name(view_name)
             self.current_widget = self.widgets.get(view_name)
             if self.current_widget and hasattr(self.current_widget, "activate"):
                 self.current_widget.activate()

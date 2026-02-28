@@ -578,7 +578,7 @@ class NotificationLogger:
             self.process = subprocess.Popen([
                 'dbus-monitor',
                 "interface='org.freedesktop.Notifications',member='Notify'"
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            ], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
 
             self.running = True
             in_notify_call = False

@@ -9,44 +9,14 @@ import sys
 import warnings
 import json
 import os
+import shlex
+from app_logging import module_print
+from ui_helpers import build_status_widget, ensure_pink_switch_css
 
-warnings.filterwarnings("ignore")
+print = module_print(__name__)
 
-# One-time CSS injection for pink-themed switches
-_PINK_SWITCH_CSS_APPLIED = False
-def ensure_pink_switch_css():
-    global _PINK_SWITCH_CSS_APPLIED
-    if _PINK_SWITCH_CSS_APPLIED:
-        return
-    css = """
-    switch.pink-toggle {
-        background-color: rgba(255, 182, 193, 0.25);
-        border: 1px solid rgba(255, 182, 193, 0.4);
-        transition: all 150ms ease;
-    }
-    switch.pink-toggle:hover {
-        background-color: rgba(255, 182, 193, 0.35);
-        border-color: rgba(255, 182, 193, 0.5);
-    }
-    switch.pink-toggle slider {
-        background-color: rgba(255, 255, 255, 0.95);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        box-shadow: 0 1px 2px rgba(0,0,0,0.25);
-    }
-    switch.pink-toggle:checked {
-        background-color: rgba(255, 182, 193, 0.5);
-        border-color: rgba(255, 182, 193, 0.7);
-        box-shadow: 0 0 0 3px rgba(255, 182, 193, 0.2);
-    }
-    """
-    provider = Gtk.CssProvider()
-    provider.load_from_data(css.encode("utf-8"))
-    Gtk.StyleContext.add_provider_for_display(
-        Gdk.Display.get_default(),
-        provider,
-        Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
-    )
-    _PINK_SWITCH_CSS_APPLIED = True
+# Only suppress specific known-benign warnings, not everything
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="gi")
 
 # This class defines a custom GTK widget to display a single WiFi network.
 # It shows the network name, signal strength, and buttons to connect or disconnect.
@@ -310,6 +280,7 @@ class WiFiWidget(Gtk.Box):
         self._is_loading = False  # Track if we're currently loading
         self._cache_dirty = False  # Track if cache needs saving
         self._pending_action = False  # Track if connect/disconnect is in progress
+        self._last_render_signature = None  # Avoid no-op UI rebuilds
 
         # Load cache from file on startup
         self.load_cache_from_file()
@@ -367,15 +338,15 @@ class WiFiWidget(Gtk.Box):
             self.wifi_data_loaded = True
             self.ethernet_data_loaded = True
             GLib.idle_add(self.update_ui)
-            self.fetch_all_data(show_spinner=False)
+            self.fetch_all_data(show_spinner=False, include_scan=True)
         else:
             # First time load - show spinner
-            self.fetch_all_data(show_spinner=True)
+            self.fetch_all_data(show_spinner=True, include_scan=True)
         
         if self.update_timer_id is None:
-            self.update_timer_id = GLib.timeout_add_seconds(10, self.update_all_connections)
+            self.update_timer_id = GLib.timeout_add_seconds(20, self.update_all_connections)
         if self.scan_timer_id is None:
-            self.scan_timer_id = GLib.timeout_add_seconds(60, self.scan_networks)
+            self.scan_timer_id = GLib.timeout_add_seconds(180, self.scan_networks)
 
     # Stops the automatic updates when the widget is hidden to save resources.
     def deactivate(self):
@@ -390,11 +361,12 @@ class WiFiWidget(Gtk.Box):
     # Updates both WiFi and Ethernet connections periodically.
     def update_all_connections(self):
         if not self.is_active: return False
-        self.fetch_all_data(show_spinner=False)  # No spinner on periodic updates
+        # Periodic refresh avoids rescanning all APs every cycle.
+        self.fetch_all_data(show_spinner=False, include_scan=False)
         return True
 
     # Fetch all data in a single background thread
-    def fetch_all_data(self, show_spinner=False):
+    def fetch_all_data(self, show_spinner=False, include_scan=False):
         # Skip if a connect/disconnect action is pending
         if self._pending_action:
             return
@@ -414,7 +386,7 @@ class WiFiWidget(Gtk.Box):
         
         def fetch_all():
             try:
-                self.fetch_all_status()
+                self.fetch_all_status(include_scan=include_scan)
             except Exception as e:
                 print(f"Error fetching data: {e}")
             finally:
@@ -422,15 +394,18 @@ class WiFiWidget(Gtk.Box):
         
         threading.Thread(target=fetch_all, daemon=True).start()
     
-    def fetch_all_status(self):
+    def fetch_all_status(self, include_scan=False):
         """Fetch all WiFi and Ethernet status in one go - runs in background thread"""
         try:
             # Get radio status
-            radio_output = subprocess.run("nmcli radio wifi", shell=True, capture_output=True, text=True, timeout=3).stdout.strip()
+            radio_output = self.run_wifi_command(["radio", "wifi"], timeout=3)
             self.wifi_enabled = radio_output == "enabled"
             
             # Get active connections (both wifi and ethernet)
-            active_output = subprocess.run("nmcli -t -f NAME,TYPE,DEVICE c show --active", shell=True, capture_output=True, text=True, timeout=3).stdout.strip()
+            active_output = self.run_wifi_command(
+                ["-t", "-f", "NAME,TYPE,DEVICE", "connection", "show", "--active"],
+                timeout=3,
+            )
             
             # Parse active connections
             self.connected_network = None
@@ -438,82 +413,87 @@ class WiFiWidget(Gtk.Box):
             for line in active_output.split('\n'):
                 if not line.strip():
                     continue
-                # Use rsplit to handle colons in connection names
-                if ':802-11-wireless:' in line:
-                    # Format: NAME:TYPE:DEVICE - split from right to handle colons in NAME
-                    idx = line.find(':802-11-wireless:')
-                    if idx > 0:
-                        ssid = line[:idx]
-                        self.connected_network = {'ssid': ssid, 'signal': 80, 'security': 'Connected'}
-                elif ':802-3-ethernet:' in line:
-                    idx = line.find(':802-3-ethernet:')
-                    if idx > 0:
-                        name = line[:idx]
-                        device = line.split(':')[-1] if ':' in line else 'eth0'
-                        self.connected_ethernet = {'name': name, 'device': device}
+                parts = self._split_nmcli_fields(line)
+                if len(parts) < 3:
+                    continue
+                name, conn_type, device = parts[0], parts[1], parts[2]
+                if conn_type == "802-11-wireless":
+                    self.connected_network = {
+                        'ssid': name,
+                        'signal': 80,
+                        'security': 'Connected',
+                    }
+                elif conn_type == "802-3-ethernet":
+                    self.connected_ethernet = {
+                        'name': name,
+                        'device': device or 'ethernet',
+                    }
             
             # Get WiFi networks if enabled
-            if self.wifi_enabled:
-                # Use human-readable format which is easier to parse
-                nets_output = subprocess.run("nmcli -t -f SSID,SIGNAL,SECURITY dev wifi list", shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
+            if self.wifi_enabled and (include_scan or not self.available_networks):
+                nets_output = self.run_wifi_command(
+                    [
+                        "-t",
+                        "-f",
+                        "SSID,SIGNAL,SECURITY",
+                        "device",
+                        "wifi",
+                        "list",
+                        "--rescan",
+                        "no",
+                    ],
+                    timeout=5,
+                )
                 self.available_networks = []
                 seen = set()
                 connected_ssid = self.connected_network['ssid'] if self.connected_network else None
                 for line in nets_output.split('\n'):
                     if not line.strip():
                         continue
-                    # nmcli -t uses : as separator, but SECURITY can have multiple values
-                    # Format: SSID:SIGNAL:SECURITY (SECURITY may contain spaces but not colons usually)
-                    # Split into max 3 parts from the right for signal and security
-                    parts = line.split(':')
-                    if len(parts) >= 2:
-                        # SSID might contain colons, so join all but last 2 parts
-                        if len(parts) > 3:
-                            ssid = ':'.join(parts[:-2])
-                            signal_str = parts[-2]
-                            security = parts[-1]
-                        elif len(parts) == 3:
-                            ssid = parts[0]
-                            signal_str = parts[1]
-                            security = parts[2]
-                        else:
-                            ssid = parts[0]
-                            signal_str = parts[1] if len(parts) > 1 else '0'
-                            security = ''
-                        
-                        if not ssid or ssid in seen:
-                            continue
-                        
-                        try:
-                            signal = int(signal_str)
-                        except:
-                            signal = 0
-                        
-                        if ssid == connected_ssid:
-                            # Update connected network signal
-                            if self.connected_network:
-                                self.connected_network['signal'] = signal
-                        else:
-                            seen.add(ssid)
-                            self.available_networks.append({
-                                'ssid': ssid, 
-                                'signal': signal, 
-                                'security': security if security else 'Open'
-                            })
+                    parts = self._split_nmcli_fields(line)
+                    if len(parts) < 2:
+                        continue
+
+                    ssid = parts[0]
+                    signal_str = parts[1]
+                    security = parts[2] if len(parts) > 2 else ''
+
+                    if not ssid or ssid == "--" or ssid in seen:
+                        continue
+
+                    try:
+                        signal = int(signal_str)
+                    except Exception:
+                        signal = 0
+
+                    if ssid == connected_ssid:
+                        # Update connected network signal
+                        if self.connected_network:
+                            self.connected_network['signal'] = signal
+                    else:
+                        seen.add(ssid)
+                        self.available_networks.append({
+                            'ssid': ssid, 
+                            'signal': signal, 
+                            'security': security if security else 'Open'
+                        })
                 self.available_networks.sort(key=lambda x: x['signal'], reverse=True)
             
             # Get available ethernet connections
-            eth_output = subprocess.run("nmcli -t -f NAME,TYPE c show", shell=True, capture_output=True, text=True, timeout=3).stdout.strip()
+            eth_output = self.run_wifi_command(
+                ["-t", "-f", "NAME,TYPE", "connection", "show"], timeout=3
+            )
             self.available_ethernet = []
             connected_eth_name = self.connected_ethernet['name'] if self.connected_ethernet else None
             for line in eth_output.split('\n'):
                 if not line.strip():
                     continue
-                if ':802-3-ethernet' in line:
-                    idx = line.find(':802-3-ethernet')
-                    conn_name = line[:idx] if idx > 0 else line.split(':')[0]
-                    if conn_name and conn_name != connected_eth_name:
-                        self.available_ethernet.append({'name': conn_name, 'device': 'ethernet'})
+                parts = self._split_nmcli_fields(line)
+                if len(parts) < 2:
+                    continue
+                conn_name, conn_type = parts[0], parts[1]
+                if conn_type == "802-3-ethernet" and conn_name != connected_eth_name:
+                    self.available_ethernet.append({'name': conn_name, 'device': 'ethernet'})
             
             self._has_cached_data = True
             self.save_cache_to_file()
@@ -528,6 +508,50 @@ class WiFiWidget(Gtk.Box):
         self.set_scan_button_loading(False)
         self.update_ui_after_data_fetch()
 
+    def _state_signature(self):
+        connected_wifi = None
+        if self.connected_network:
+            connected_wifi = (
+                self.connected_network.get("ssid"),
+                self.connected_network.get("signal"),
+                self.connected_network.get("security"),
+            )
+
+        connected_eth = None
+        if self.connected_ethernet:
+            connected_eth = (
+                self.connected_ethernet.get("name"),
+                self.connected_ethernet.get("device"),
+            )
+
+        available_wifi = tuple(
+            sorted(
+                (
+                    n.get("ssid"),
+                    n.get("signal"),
+                    n.get("security"),
+                )
+                for n in self.available_networks
+            )
+        )
+        available_eth = tuple(
+            sorted(
+                (
+                    e.get("name"),
+                    e.get("device"),
+                )
+                for e in self.available_ethernet
+            )
+        )
+
+        return (
+            bool(self.wifi_enabled),
+            connected_wifi,
+            connected_eth,
+            available_wifi,
+            available_eth,
+        )
+
     def update_ui_after_data_fetch(self):
         """Update UI after all data has been fetched"""
         try:
@@ -536,8 +560,9 @@ class WiFiWidget(Gtk.Box):
             self.wifi_switch.set_active(self.wifi_enabled)
             self.wifi_switch.handler_unblock_by_func(self.on_wifi_toggled)
             
-            # Update the main UI
-            self.update_ui()
+            signature = self._state_signature()
+            if signature != self._last_render_signature:
+                self.update_ui()
         except Exception as e:
             print(f"Error updating UI after data fetch: {e}")
 
@@ -549,17 +574,12 @@ class WiFiWidget(Gtk.Box):
                 self.content_box.remove(child)
             self.network_widgets.clear()
             self.ethernet_widgets.clear()
-            
-            # Show loading spinner
-            loading_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
-                                  halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER,
-                                  vexpand=True)
-            
-            spinner = Gtk.Spinner(spinning=True, width_request=32, height_request=32)
-            loading_label = Gtk.Label(label="Loading network information...", css_classes=["dim-label"])
-            
-            loading_box.append(spinner)
-            loading_box.append(loading_label)
+
+            loading_box = build_status_widget(
+                title="Loading Network Data",
+                subtitle="Fetching WiFi and ethernet information...",
+                spinner=True,
+            )
             self.content_box.append(loading_box)
         except Exception as e:
             print(f"Error showing loading state: {e}")
@@ -572,19 +592,12 @@ class WiFiWidget(Gtk.Box):
                 self.content_box.remove(child)
             self.network_widgets.clear()
             self.ethernet_widgets.clear()
-            
-            error_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
-                                halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER,
-                                vexpand=True)
-            
-            error_icon = Gtk.Image(icon_name="dialog-error-symbolic")
-            error_icon.set_pixel_size(48)
-            error_title = Gtk.Label(label=title, css_classes=["title-label"])
-            error_message = Gtk.Label(label=message, css_classes=["dim-label"])
-            
-            error_box.append(error_icon)
-            error_box.append(error_title)
-            error_box.append(error_message)
+
+            error_box = build_status_widget(
+                title=title,
+                subtitle=message,
+                icon_name="dialog-error-symbolic",
+            )
             self.content_box.append(error_box)
         except Exception as e:
             print(f"Error showing error state: {e}")
@@ -608,7 +621,10 @@ class WiFiWidget(Gtk.Box):
         
         # Display cached data if available, otherwise will show loading when activated
         if self._has_cached_data:
+            # Block handler to prevent triggering nmcli commands from cached state
+            self.wifi_switch.handler_block_by_func(self.on_wifi_toggled)
             self.wifi_switch.set_active(self.wifi_enabled)
+            self.wifi_switch.handler_unblock_by_func(self.on_wifi_toggled)
             self.wifi_data_loaded = True
             self.ethernet_data_loaded = True
             self.update_ui()
@@ -622,13 +638,42 @@ class WiFiWidget(Gtk.Box):
             self.scan_button.remove_css_class("refresh-spinning")
             self.scan_button.set_sensitive(True)
 
+    @staticmethod
+    def _split_nmcli_fields(line):
+        """Split nmcli terse output on unescaped colons."""
+        fields = []
+        current = []
+        escaped = False
+        for char in line:
+            if escaped:
+                current.append(char)
+                escaped = False
+                continue
+            if char == "\\":
+                escaped = True
+                continue
+            if char == ":":
+                fields.append("".join(current))
+                current = []
+                continue
+            current.append(char)
+        fields.append("".join(current))
+        return fields
+
     # A simple helper to run a command and return its output.
     def run_wifi_command(self, command, timeout=15):
         try:
-            # Use shell=True for commands with pipes, quotes, and special characters
-            result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=timeout)
+            args = shlex.split(command) if isinstance(command, str) else list(command)
+            if args and args[0] != "nmcli":
+                args = ["nmcli"] + args
+            result = subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
             return result.stdout.strip() if result.returncode == 0 else ""
-        except Exception as e:
+        except Exception:
             return ""
 
     # Legacy methods kept for compatibility but now use threaded approach
@@ -661,26 +706,33 @@ class WiFiWidget(Gtk.Box):
         if self.wifi_enabled:
             self.set_scan_button_loading(True)
             def do_scan():
-                self.run_wifi_command("nmcli dev wifi rescan")
-                GLib.idle_add(lambda: self.fetch_all_data(show_spinner=False) or False)
+                self.run_wifi_command(["device", "wifi", "rescan"])
+                GLib.idle_add(
+                    lambda: self.fetch_all_data(show_spinner=False, include_scan=True)
+                    or False
+                )
             threading.Thread(target=do_scan, daemon=True).start()
         return True
 
     # This function is called when the user clicks the main WiFi on/off switch.
     def on_wifi_toggled(self, switch, *args):
-        cmd = f"nmcli radio wifi {'on' if switch.get_active() else 'off'}"
+        cmd = ["radio", "wifi", "on" if switch.get_active() else "off"]
         def do_toggle():
             self.run_wifi_command(cmd)
-            GLib.timeout_add(500, lambda: self.fetch_all_data(show_spinner=False) or False)
+            GLib.timeout_add(
+                500,
+                lambda: self.fetch_all_data(show_spinner=False, include_scan=True)
+                or False,
+            )
         threading.Thread(target=do_toggle, daemon=True).start()
 
     # Checks if a saved connection profile already exists for a given network SSID.
     def does_connection_exist(self, ssid):
-        return ssid in self.run_wifi_command("nmcli -t -f NAME c").split('\n')
+        return ssid in self.run_wifi_command(["-t", "-f", "NAME", "connection"]).split('\n')
 
     # Creates the correct shell command to connect to a new password-protected network.
     def get_connect_and_save_command(self, ssid, password):
-        return f"nmcli device wifi connect '{ssid}' password '{password}'"
+        return ["device", "wifi", "connect", ssid, "password", password]
 
     # This is triggered when a user clicks the "Connect" or "Disconnect" button for a network.
     def on_network_connect(self, network_info, connect=True):
@@ -694,10 +746,10 @@ class WiFiWidget(Gtk.Box):
         if connect:
             is_open = network_info.get('security', '') in ['Open', '--', '']
             if is_open:
-                cmd = f"nmcli dev wifi connect '{ssid}'"
+                cmd = ["device", "wifi", "connect", ssid]
             elif self.does_connection_exist(ssid):
                 print(f"Connecting to saved network: {ssid}")
-                cmd = f"nmcli c up '{ssid}'"
+                cmd = ["connection", "up", ssid]
             else:
                 if widget: widget.set_loading(False)
                 self._pending_action = False
@@ -708,7 +760,7 @@ class WiFiWidget(Gtk.Box):
             self.connected_network = {'ssid': ssid, 'signal': network_info.get('signal', 80), 'security': 'Connected'}
             self.available_networks = [n for n in self.available_networks if n['ssid'] != ssid]
         else:
-            cmd = f"nmcli c down '{ssid}'"
+            cmd = ["connection", "down", ssid]
             # Optimistic UI update - show as disconnected immediately
             if self.connected_network and self.connected_network.get('ssid') == ssid:
                 # Move to available networks with original security type
@@ -727,14 +779,14 @@ class WiFiWidget(Gtk.Box):
 
         def do_action():
             try:
-                subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+                self.run_wifi_command(cmd, timeout=10)
             except Exception as e:
                 print(f"WiFi command error: {e}")
             finally:
                 # Always refresh after command completes
                 def finish():
                     self._pending_action = False
-                    self.fetch_all_data(show_spinner=False)
+                    self.fetch_all_data(show_spinner=False, include_scan=True)
                     return False
                 GLib.timeout_add(300, finish)  # Small delay for nmcli to settle
         threading.Thread(target=do_action, daemon=True).start()
@@ -761,17 +813,21 @@ class WiFiWidget(Gtk.Box):
         # Update UI immediately
         self.update_ui()
 
-        cmd = f"nmcli c up '{conn_name}'" if connect else f"nmcli c down '{conn_name}'"
+        cmd = (
+            ["connection", "up", conn_name]
+            if connect
+            else ["connection", "down", conn_name]
+        )
         
         def do_action():
             try:
-                subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+                self.run_wifi_command(cmd, timeout=10)
             except Exception as e:
                 print(f"Ethernet command error: {e}")
             finally:
                 def finish():
                     self._pending_action = False
-                    self.fetch_all_data(show_spinner=False)
+                    self.fetch_all_data(show_spinner=False, include_scan=True)
                     return False
                 GLib.timeout_add(300, finish)
         threading.Thread(target=do_action, daemon=True).start()
@@ -805,13 +861,13 @@ class WiFiWidget(Gtk.Box):
                 connect_cmd = self.get_connect_and_save_command(ssid, password)
                 def do_connect():
                     try:
-                        subprocess.run(connect_cmd, shell=True, capture_output=True, text=True, timeout=15)
+                        self.run_wifi_command(connect_cmd, timeout=15)
                     except Exception as e:
                         print(f"WiFi connect error: {e}")
                     finally:
                         def finish():
                             self._pending_action = False
-                            self.fetch_all_data(show_spinner=False)
+                            self.fetch_all_data(show_spinner=False, include_scan=True)
                             return False
                         GLib.timeout_add(300, finish)
                 threading.Thread(target=do_connect, daemon=True).start()
@@ -877,14 +933,17 @@ class WiFiWidget(Gtk.Box):
         elif not self.connected_network and not self.available_networks and not self.connected_ethernet and not self.available_ethernet:
             self.show_no_networks()
 
+        self._last_render_signature = self._state_signature()
+
     # A general function to display a placeholder message with an icon and text.
     def show_placeholder(self, icon_name, title, subtitle):
-        while child := self.content_box.get_first_child(): self.content_box.remove(child)
-        placeholder = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, vexpand=True, valign=Gtk.Align.CENTER, css_classes=["dim-label"])
-        placeholder.append(Gtk.Image.new_from_icon_name(icon_name))
-        placeholder.append(Gtk.Label(label=title, css_classes=["title-large"]))
-        placeholder.append(Gtk.Label(label=subtitle))
-        for child in placeholder: child.set_pixel_size(64) if isinstance(child, Gtk.Image) else None
+        while child := self.content_box.get_first_child():
+            self.content_box.remove(child)
+        placeholder = build_status_widget(
+            title=title,
+            subtitle=subtitle,
+            icon_name=icon_name,
+        )
         self.content_box.append(placeholder)
         
     # Shows a specific message for when no WiFi networks are found.

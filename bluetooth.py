@@ -9,44 +9,15 @@ import threading
 import queue
 import warnings
 import os
+import shlex
+import time
+from app_logging import module_print
+from ui_helpers import build_status_widget, ensure_pink_switch_css
 
-warnings.filterwarnings("ignore")
+print = module_print(__name__)
 
-# One-time CSS injection for pink-themed switches
-_PINK_SWITCH_CSS_APPLIED = False
-def ensure_pink_switch_css():
-    global _PINK_SWITCH_CSS_APPLIED
-    if _PINK_SWITCH_CSS_APPLIED:
-        return
-    css = """
-    switch.pink-toggle {
-        background-color: rgba(255, 182, 193, 0.25);
-        border: 1px solid rgba(255, 182, 193, 0.4);
-        transition: all 150ms ease;
-    }
-    switch.pink-toggle:hover {
-        background-color: rgba(255, 182, 193, 0.35);
-        border-color: rgba(255, 182, 193, 0.5);
-    }
-    switch.pink-toggle slider {
-        background-color: rgba(255, 255, 255, 0.95);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        box-shadow: 0 1px 2px rgba(0,0,0,0.25);
-    }
-    switch.pink-toggle:checked {
-        background-color: rgba(255, 182, 193, 0.5);
-        border-color: rgba(255, 182, 193, 0.7);
-        box-shadow: 0 0 0 3px rgba(255, 182, 193, 0.2);
-    }
-    """
-    provider = Gtk.CssProvider()
-    provider.load_from_data(css.encode("utf-8"))
-    Gtk.StyleContext.add_provider_for_display(
-        Gdk.Display.get_default(),
-        provider,
-        Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
-    )
-    _PINK_SWITCH_CSS_APPLIED = True
+# Only suppress specific known-benign warnings, not everything
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="gi")
 
 # This class represents a single row for a Bluetooth device in the UI.
 # It displays the device's icon, name, status, and buttons to connect or disconnect.
@@ -187,6 +158,9 @@ class BluetoothWidget(Gtk.Box):
         self.device_widgets = {}
         self._battery_cache = {}  # Cache battery levels
         self._battery_cache_timeout = 120  # Seconds before re-checking battery
+        self._device_type_cache = {}  # Cache device type lookups
+        self._device_type_cache_timeout = 900
+        self._last_render_signature = None
 
         self.command_queue = queue.Queue()
         self.command_thread = threading.Thread(target=self.command_worker, daemon=True)
@@ -207,8 +181,8 @@ class BluetoothWidget(Gtk.Box):
         print("BluetoothWidget Activated")
         self.update_bluetooth_status()
         if self.update_timer_id is None:
-            self.update_timer_id = GLib.timeout_add_seconds(5, self.update_bluetooth_status)
-            self.scan_timer_id = GLib.timeout_add_seconds(30, self.scan_devices)
+            self.update_timer_id = GLib.timeout_add_seconds(10, self.update_bluetooth_status)
+            self.scan_timer_id = GLib.timeout_add_seconds(120, self.scan_devices)
 
     # This is called when the widget is hidden. It stops the periodic
     # checks and scanning to save system resources.
@@ -233,9 +207,9 @@ class BluetoothWidget(Gtk.Box):
                 if command:
                     # Convert string command to list for better performance
                     if isinstance(command, str):
-                        cmd_list = command.split()
+                        cmd_list = shlex.split(command)
                     else:
-                        cmd_list = command
+                        cmd_list = list(command)
                     subprocess.run(cmd_list, capture_output=True, text=True, timeout=10)
                 self.command_queue.task_done()
             except queue.Empty:
@@ -290,12 +264,12 @@ class BluetoothWidget(Gtk.Box):
         try:
             # Convert string command to list for better performance (no shell overhead)
             if isinstance(command, str):
-                cmd_list = command.split()
+                cmd_list = shlex.split(command)
             else:
-                cmd_list = command
+                cmd_list = list(command)
             result = subprocess.run(cmd_list, capture_output=True, text=True, timeout=3)
             return result.stdout.strip() if result.returncode == 0 else ""
-        except Exception as e:
+        except Exception:
             return ""
 
     # Checks if Bluetooth is currently powered on and updates the device list accordingly.
@@ -303,7 +277,7 @@ class BluetoothWidget(Gtk.Box):
         if not self.is_active:
             return False
 
-        status_output = self.run_bluetooth_command("bluetoothctl show")
+        status_output = self.run_bluetooth_command(["bluetoothctl", "show"])
         self.bluetooth_enabled = "Powered: yes" in status_output
 
         self.bluetooth_switch.handler_block_by_func(self.on_bluetooth_toggled)
@@ -313,22 +287,48 @@ class BluetoothWidget(Gtk.Box):
         if self.bluetooth_enabled:
             self.update_devices()
         else:
-            self.show_bluetooth_disabled()
+            self.connected_devices = []
+            self.available_devices = []
+            disabled_signature = self._state_signature([], [])
+            if disabled_signature != self._last_render_signature:
+                self.show_bluetooth_disabled()
+                self._last_render_signature = disabled_signature
 
         return True
 
     # Fetches the latest lists of connected and available (paired) devices.
     def update_devices(self):
-        connected_output = self.run_bluetooth_command("bluetoothctl devices Connected")
-        self.connected_devices = self.parse_device_list(connected_output, connected=True)
+        connected_output = self.run_bluetooth_command(["bluetoothctl", "devices", "Connected"])
+        connected_devices = self.parse_device_list(connected_output, connected=True)
+        connected_devices.sort(key=lambda d: d.get("name", ""))
 
-        paired_output = self.run_bluetooth_command("bluetoothctl devices Paired")
+        paired_output = self.run_bluetooth_command(["bluetoothctl", "devices", "Paired"])
         paired_devices = self.parse_device_list(paired_output, connected=False)
 
-        connected_macs = {d['mac'] for d in self.connected_devices}
-        self.available_devices = [d for d in paired_devices if d['mac'] not in connected_macs]
+        connected_macs = {d['mac'] for d in connected_devices}
+        available_devices = [d for d in paired_devices if d['mac'] not in connected_macs]
+        available_devices.sort(key=lambda d: d.get("name", ""))
 
+        new_signature = self._state_signature(connected_devices, available_devices)
+        if new_signature == self._last_render_signature:
+            return
+
+        self.connected_devices = connected_devices
+        self.available_devices = available_devices
         self.update_ui()
+
+    def _state_signature(self, connected_devices=None, available_devices=None):
+        connected = connected_devices if connected_devices is not None else self.connected_devices
+        available = available_devices if available_devices is not None else self.available_devices
+        connected_sig = tuple(
+            (d.get("mac"), d.get("name"), d.get("type"), d.get("battery"))
+            for d in connected
+        )
+        available_sig = tuple(
+            (d.get("mac"), d.get("name"), d.get("type"))
+            for d in available
+        )
+        return (bool(self.bluetooth_enabled), connected_sig, available_sig)
 
     # Processes the raw text output from bluetoothctl into a clean list of devices.
     def parse_device_list(self, output, connected=False):
@@ -356,19 +356,29 @@ class BluetoothWidget(Gtk.Box):
     # Tries to determine what kind of device it is (e.g., audio, input)
     # by looking at its name and other technical details.
     def get_device_type(self, mac, name):
-        info_output = self.run_bluetooth_command(f"bluetoothctl info {mac}")
+        cache_entry = self._device_type_cache.get(mac)
+        now = time.time()
+        if cache_entry and now - cache_entry[1] < self._device_type_cache_timeout:
+            return cache_entry[0]
 
         name_lower = name.lower()
         if any(word in name_lower for word in ['headphone', 'headset', 'buds', 'earphone', 'airpods']):
+            self._device_type_cache[mac] = ("audio", now)
             return "audio"
         elif any(word in name_lower for word in ['mouse']):
+            self._device_type_cache[mac] = ("input", now)
             return "input"
         elif any(word in name_lower for word in ['keyboard']):
+            self._device_type_cache[mac] = ("input", now)
             return "input"
         elif any(word in name_lower for word in ['phone']):
+            self._device_type_cache[mac] = ("phone", now)
             return "phone"
         elif any(word in name_lower for word in ['speaker', 'soundbar']):
+            self._device_type_cache[mac] = ("audio", now)
             return "audio"
+
+        info_output = self.run_bluetooth_command(["bluetoothctl", "info", mac])
 
         if "Class:" in info_output:
             class_match = re.search(r'Class: 0x(\w+)', info_output)
@@ -377,25 +387,30 @@ class BluetoothWidget(Gtk.Box):
                 try:
                     major_class = (int(device_class, 16) >> 8) & 0x1F
                     if major_class == 4:
+                        self._device_type_cache[mac] = ("audio", now)
                         return "audio"
                     elif major_class == 5:
+                        self._device_type_cache[mac] = ("input", now)
                         return "input"
                     elif major_class == 2:
+                        self._device_type_cache[mac] = ("phone", now)
                         return "phone"
                 except ValueError:
                     pass
 
         if "Audio Sink" in info_output or "A2DP" in info_output:
+            self._device_type_cache[mac] = ("audio", now)
             return "audio"
         elif "Human Interface Device" in info_output or "HID" in info_output:
+            self._device_type_cache[mac] = ("input", now)
             return "input"
 
+        self._device_type_cache[mac] = ("unknown", now)
         return "unknown"
 
     # This function attempts to find the battery level of a device, correctly parsing
     # both decimal and hexadecimal values from the system. Uses caching to reduce overhead.
     def get_battery_level(self, mac, name):
-        import time
         cache_key = mac
         now = time.time()
         
@@ -405,7 +420,6 @@ class BluetoothWidget(Gtk.Box):
             if now - cached_time < self._battery_cache_timeout:
                 return cached_value
         
-        print(f"Getting battery level for {name} ({mac})")
         mac_formatted = mac.replace(':', '_')
 
         # Method 1: Try D-Bus directly using gdbus (most reliable)
@@ -420,7 +434,6 @@ class BluetoothWidget(Gtk.Box):
             dbus_output = result.stdout.strip() if result.returncode == 0 else ""
 
             if dbus_output:
-                print(f"D-Bus output for {name}: {dbus_output}")
                 # Updated regex to capture hex (0x..) or decimal (\d+) values
                 match = re.search(r'(?:byte|uint8)\s+(0x[0-9a-fA-F]+|\d+)', dbus_output)
                 if match:
@@ -428,22 +441,20 @@ class BluetoothWidget(Gtk.Box):
                     # int(value, 0) automatically handles '0x' prefixes for hex
                     battery_level = int(value_str, 0)
                     if 0 <= battery_level <= 100:
-                        print(f"Battery found via D-Bus: {battery_level}% for {name} (parsed from '{value_str}')")
                         self._battery_cache[cache_key] = (battery_level, now)
                         return battery_level
-        except Exception as e:
-            print(f"Error querying D-Bus for battery: {e}")
+        except Exception:
+            pass
 
         # Method 2: Try bluetoothctl info (good fallback, also handles hex/dec)
         try:
             info_output = self.run_bluetooth_command(["bluetoothctl", "info", mac])
             if info_output:
                 # First, try to find the simple decimal value in parentheses, e.g. (74)
-                match = re.search(r'Battery Percentage:.*?\((d+)\)', info_output)
+                match = re.search(r'Battery Percentage:.*?\((\d+)\)', info_output)
                 if match:
                     battery_level = int(match.group(1))
                     if 0 <= battery_level <= 100:
-                        print(f"Battery found via bluetoothctl (decimal): {battery_level}% for {name}")
                         self._battery_cache[cache_key] = (battery_level, now)
                         return battery_level
 
@@ -453,11 +464,10 @@ class BluetoothWidget(Gtk.Box):
                     value_str = match.group(1)
                     battery_level = int(value_str, 0)
                     if 0 <= battery_level <= 100:
-                        print(f"Battery found via bluetoothctl (hex/dec): {battery_level}% for {name} (parsed from '{value_str}')")
                         self._battery_cache[cache_key] = (battery_level, now)
                         return battery_level
-        except Exception as e:
-            print(f"Error querying bluetoothctl for battery: {e}")
+        except Exception:
+            pass
 
         # Method 3: Check /sys/class/power_supply (less common but worth trying)
         try:
@@ -471,13 +481,11 @@ class BluetoothWidget(Gtk.Box):
                             if capacity.isdigit():
                                 battery_level = int(capacity)
                                 if 0 <= battery_level <= 100:
-                                    print(f"Battery found via /sys: {battery_level}% for {name}")
                                     self._battery_cache[cache_key] = (battery_level, now)
                                     return battery_level
-        except (OSError, IOError) as e:
-            print(f"Could not read /sys/class/power_supply: {e}")
+        except (OSError, IOError):
+            pass
 
-        print(f"No reliable battery information found for {name} ({mac})")
         self._battery_cache[cache_key] = (None, now)
         return None
     
@@ -493,15 +501,15 @@ class BluetoothWidget(Gtk.Box):
     # Starts a scan for nearby Bluetooth devices for a few seconds.
     def scan_devices(self):
         if not self.bluetooth_enabled:
-            return False
+            return True  # Keep timer alive so scanning resumes when BT is re-enabled
 
         # Show spinning button during scan
         self.set_scan_button_loading(True)
         
-        self.command_queue.put("bluetoothctl scan on")
+        self.command_queue.put(["bluetoothctl", "scan", "on"])
         
         def stop_scan_and_update():
-            self.command_queue.put("bluetoothctl scan off")
+            self.command_queue.put(["bluetoothctl", "scan", "off"])
             self.update_devices()
             self.set_scan_button_loading(False)
             return False
@@ -513,9 +521,13 @@ class BluetoothWidget(Gtk.Box):
     # This function is called when the user clicks the main on/off switch.
     def on_bluetooth_toggled(self, switch, *args):
         if switch.get_active():
-            self.command_queue.put("bluetoothctl power on")
+            self.command_queue.put(["bluetoothctl", "power", "on"])
         else:
-            self.command_queue.put("bluetoothctl power off")
+            self.command_queue.put(["bluetoothctl", "power", "off"])
+        def refresh_once():
+            self.update_bluetooth_status()
+            return False
+        GLib.timeout_add_seconds(1, refresh_once)
 
     # Handles clicks on the "Connect" or "Disconnect" button for a specific device.
     def on_device_connect(self, device_info, connect=True):
@@ -526,9 +538,9 @@ class BluetoothWidget(Gtk.Box):
             widget.set_loading(True)
 
         if connect:
-            self.command_queue.put(f"bluetoothctl connect {mac}")
+            self.command_queue.put(["bluetoothctl", "connect", mac])
         else:
-            self.command_queue.put(f"bluetoothctl disconnect {mac}")
+            self.command_queue.put(["bluetoothctl", "disconnect", mac])
 
         def update_and_hide_loading():
             self.update_devices()
@@ -585,27 +597,15 @@ class BluetoothWidget(Gtk.Box):
         if not self.connected_devices and not self.available_devices:
             self.show_no_devices()
 
+        self._last_render_signature = self._state_signature()
+
     # Displays a message indicating that no devices were found.
     def show_no_devices(self):
-        no_devices_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
-        no_devices_box.set_valign(Gtk.Align.CENTER)
-        no_devices_box.set_vexpand(True)
-
-        icon = Gtk.Image.new_from_icon_name("bluetooth-symbolic")
-        icon.set_pixel_size(64)
-        icon.add_css_class("dim-label")
-
-        message_label = Gtk.Label(label="No Bluetooth Devices Found")
-        message_label.add_css_class("title-large")
-        message_label.add_css_class("dim-label")
-
-        hint_label = Gtk.Label(label="Make sure devices are in pairing mode and click scan")
-        hint_label.add_css_class("dim-label")
-
-        no_devices_box.append(icon)
-        no_devices_box.append(message_label)
-        no_devices_box.append(hint_label)
-
+        no_devices_box = build_status_widget(
+            title="No Bluetooth Devices",
+            subtitle="Put a device in pairing mode, then press scan.",
+            icon_name="bluetooth-symbolic",
+        )
         self.content_box.append(no_devices_box)
 
     # Displays a message informing the user that Bluetooth is turned off.
@@ -615,23 +615,9 @@ class BluetoothWidget(Gtk.Box):
             self.content_box.remove(child)
             child = self.content_box.get_first_child()
 
-        disabled_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
-        disabled_box.set_valign(Gtk.Align.CENTER)
-        disabled_box.set_vexpand(True)
-
-        icon = Gtk.Image.new_from_icon_name("bluetooth-disabled-symbolic")
-        icon.set_pixel_size(64)
-        icon.add_css_class("dim-label")
-
-        message_label = Gtk.Label(label="Bluetooth is Disabled")
-        message_label.add_css_class("title-large")
-        message_label.add_css_class("dim-label")
-
-        hint_label = Gtk.Label(label="Enable bluetooth to see your devices")
-        hint_label.add_css_class("dim-label")
-
-        disabled_box.append(icon)
-        disabled_box.append(message_label)
-        disabled_box.append(hint_label)
-
+        disabled_box = build_status_widget(
+            title="Bluetooth Is Disabled",
+            subtitle="Enable Bluetooth to see connected and paired devices.",
+            icon_name="bluetooth-disabled-symbolic",
+        )
         self.content_box.append(disabled_box)
